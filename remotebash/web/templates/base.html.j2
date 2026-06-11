@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>{% block title %}RemoteBash{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: { DEFAULT: '#0f1117', raised: '#1a1d27', overlay: '#222533' },
+            border: { DEFAULT: '#2a2d3a', hover: '#3a3d4a' },
+            accent: { DEFAULT: '#58a6ff', hover: '#4090e0' },
+            muted: '#8b949e',
+            green: '#3fb950',
+            red: '#f85149',
+            yellow: '#d2991d',
+          }
+        }
+      }
+    }
+  </script>
+  {% block head_extra %}{% endblock %}
+</head>
+<body class="bg-surface text-gray-200 min-h-screen font-sans antialiased">
+  {% block body %}{% endblock %}
+  <div id="toast" class="fixed top-5 right-5 z-50 bg-surface-overlay border border-border rounded-xl px-5 py-3 text-sm shadow-2xl opacity-0 translate-y-2 transition-all duration-300 pointer-events-none"></div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
