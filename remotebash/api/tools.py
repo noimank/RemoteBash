@@ -1,7 +1,12 @@
 """MCP tools — RemoteShell() and ListRemoteClients()."""
 
+import logging
+
 from fastmcp.dependencies import CurrentContext
+from fastmcp.exceptions import ToolError
 from fastmcp.server.context import Context
+
+logger = logging.getLogger(__name__)
 
 
 def register_tools(mcp):
@@ -26,7 +31,12 @@ def register_tools(mcp):
             ``{stdout, stderr, exit_code, cwd}``.
         """
         mgr = ctx.lifespan_context["manager"]
-        result = await mgr.get(client_name).exec(command, timeout=timeout)
+        try:
+            session = mgr.get(client_name)
+        except KeyError as e:
+            logger.warning("Client '%s' not found", client_name)
+            raise ToolError(str(e), log_level=logging.INFO) from None
+        result = await session.exec(command, timeout=timeout)
         return {k: result[k] for k in ("stdout", "stderr", "exit_code", "cwd")}
 
     @mcp.tool
