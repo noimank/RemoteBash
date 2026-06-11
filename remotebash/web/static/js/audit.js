@@ -8,6 +8,7 @@ const PAGE_SIZE = 50;
 
 let currentPage = 0;
 let totalEntries = 0;
+let currentEntries = [];
 
 // ---------------------------------------------------------------------------
 // 提示
@@ -74,35 +75,75 @@ function timeAgo(iso) {
   return d.toLocaleDateString("zh-CN");
 }
 
-function truncate(s, max) {
-  if (!s) return "";
-  return s.length > max ? s.slice(0, max) + "…" : s;
-}
-
 function exitBadge(code) {
   if (code === 0) return '<span class="text-green text-xs font-mono">0</span>';
   return '<span class="text-red text-xs font-mono">' + code + '</span>';
 }
 
+function escapeHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + "B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + "KB";
+  return (bytes / (1024 * 1024)).toFixed(2) + "MB";
+}
+
+function openDetail(idx) {
+  const entry = currentEntries[idx];
+  if (!entry) return;
+  const m = document.getElementById("detailModal");
+  document.getElementById("mdClient").textContent = entry.client_name;
+  document.getElementById("mdTime").textContent = timeAgo(entry.created_at) + " · " + new Date(entry.created_at + "Z").toLocaleString("zh-CN");
+  document.getElementById("mdExit").innerHTML = exitBadge(entry.exit_code);
+  document.getElementById("mdCmd").textContent = entry.command || "(空)";
+  document.getElementById("mdCwd").textContent = entry.cwd || "~";
+  document.getElementById("mdDuration").textContent = entry.duration_ms + "ms";
+  const out = entry.stdout || "";
+  const err = entry.stderr || "";
+  document.getElementById("mdOut").textContent = out || "(空)";
+  document.getElementById("mdOut").className = out ? "text-xs text-gray-300 bg-surface px-3 py-2.5 rounded-lg overflow-x-auto max-h-72 overflow-y-auto whitespace-pre-wrap break-all" : "text-xs text-muted italic bg-surface px-3 py-2.5 rounded-lg";
+  document.getElementById("mdOutSize").textContent = out ? "(" + formatSize(out.length) + ")" : "";
+  document.getElementById("mdErr").textContent = err || "(空)";
+  document.getElementById("mdErr").className = err ? "text-xs text-red/70 bg-surface px-3 py-2.5 rounded-lg overflow-x-auto max-h-72 overflow-y-auto whitespace-pre-wrap break-all" : "text-xs text-muted italic bg-surface px-3 py-2.5 rounded-lg";
+  document.getElementById("mdErrSize").textContent = err ? "(" + formatSize(err.length) + ")" : "";
+  m.classList.remove("hidden");
+  m.classList.add("flex");
+}
+
+function closeDetail() {
+  const m = document.getElementById("detailModal");
+  m.classList.add("hidden");
+  m.classList.remove("flex");
+}
+
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDetail(); });
+
 function renderAudit(entries) {
   const list = document.getElementById("auditList");
+  currentEntries = entries;
   if (!entries.length) {
     list.innerHTML = '<div class="text-center py-12 text-muted text-sm">暂无审计记录。</div>';
     return;
   }
-  list.innerHTML = entries.map(e => `
-    <div class="bg-surface border border-border rounded-lg p-3.5 hover:border-border-hover transition-colors">
-      <div class="flex items-center gap-3 mb-2">
-        <code class="text-accent text-xs font-mono">${e.client_name}</code>
-        <span class="text-[11px] text-muted">${timeAgo(e.created_at)}</span>
-        <span class="text-[11px] text-muted">${e.duration_ms}ms</span>
+  list.innerHTML = entries.map((e, i) => {
+    const hasOut = e.stdout && e.stdout.length > 0;
+    const hasErr = e.stderr && e.stderr.length > 0;
+    return `
+    <div class="bg-surface border border-border rounded-lg hover:border-border-hover transition-colors group">
+      <div class="flex items-center gap-1.5 px-3 py-2">
+        ${hasOut ? '<span class="w-1.5 h-1.5 rounded-full bg-green shrink-0" title="stdout: ' + formatSize(e.stdout.length) + '"></span>' : ''}
+        ${hasErr ? '<span class="w-1.5 h-1.5 rounded-full bg-red shrink-0" title="stderr: ' + formatSize(e.stderr.length) + '"></span>' : ''}
+        <span class="text-[11px] text-muted w-[84px] shrink-0">${timeAgo(e.created_at)}</span>
+        <code class="text-accent text-[11px] font-mono w-[88px] shrink-0 truncate" title="${escapeHtml(e.client_name)}">${e.client_name}</code>
+        <code class="text-xs text-gray-300 font-mono truncate flex-1 min-w-0" title="${escapeHtml(e.command)}">$ ${escapeHtml(e.command)}</code>
+        <span class="text-[11px] text-muted w-[46px] text-right shrink-0">${e.duration_ms}ms</span>
         ${exitBadge(e.exit_code)}
-        <span class="text-[11px] text-muted truncate max-w-[300px]" title="${e.cwd}">${e.cwd || "~"}</span>
+        <button onclick="openDetail(${i})" class="ml-1 rounded-md border border-border hover:border-accent hover:text-accent text-muted text-[11px] px-2 py-0.5 transition-colors shrink-0 font-medium">详情</button>
       </div>
-      <code class="block text-xs font-mono text-gray-300 bg-surface px-3 py-2 rounded-md overflow-x-auto">$ ${e.command}</code>
-      ${e.stdout ? '<pre class="text-xs text-muted mt-2 px-3 max-h-24 overflow-y-auto">' + truncate(e.stdout, 500) + '</pre>' : ''}
-      ${e.stderr ? '<pre class="text-xs text-red/70 mt-1 px-3 max-h-24 overflow-y-auto">' + truncate(e.stderr, 500) + '</pre>' : ''}
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 // ---------------------------------------------------------------------------

@@ -2,24 +2,24 @@
 {% block title %}RemoteBash · 审计日志{% endblock %}
 {% block body %}
   {% include "partials/header.html.j2" %}
-  <main class="max-w-6xl mx-auto px-6 py-8 space-y-8">
-    <section class="bg-surface-raised border border-border rounded-2xl p-6">
-      <h2 class="text-base font-semibold mb-4 flex items-center gap-2">
+  <main class="max-w-6xl mx-auto px-6 py-8 h-[calc(100vh-4rem)] flex flex-col">
+    <section class="bg-surface-raised border border-border rounded-2xl p-6 flex flex-col flex-1 min-h-0">
+      <h2 class="text-base font-semibold mb-4 flex items-center gap-2 shrink-0">
         <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
         审计日志
         <span id="totalCount" class="text-xs text-muted font-normal ml-1"></span>
       </h2>
-      <div class="flex flex-wrap items-center gap-3 mb-4">
+      <div class="flex flex-wrap items-center gap-3 mb-4 shrink-0">
         <select id="filterClient" class="rounded-lg bg-surface border border-border px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent">
           <option value="">全部主机</option>
         </select>
         <button onclick="refreshAudit()" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium">刷新</button>
         <button onclick="clearAudit()" class="rounded-lg border border-red/30 hover:bg-red/10 text-red text-xs px-3 py-1.5 transition-colors font-medium ml-auto">清除当前</button>
       </div>
-      <div id="auditList" class="space-y-2 max-h-[600px] overflow-y-auto">
+      <div id="auditList" class="space-y-1.5 flex-1 overflow-y-auto min-h-0">
         <div class="text-center py-12 text-muted text-sm">暂无审计记录。</div>
       </div>
-      <div class="flex items-center justify-between mt-4 pt-4 border-t border-border">
+      <div class="flex items-center justify-between mt-4 pt-4 border-t border-border shrink-0">
         <span id="pageInfo" class="text-xs text-muted"></span>
         <div class="flex gap-2">
           <button onclick="prevPage()" id="prevBtn" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium">&#8592; 上一页</button>
@@ -27,6 +27,39 @@
         </div>
       </div>
     </section>
+    <!-- 详情弹窗 -->
+    <div id="detailModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 backdrop-blur-sm" onclick="if(event.target===this)closeDetail()">
+      <div class="bg-surface-raised border border-border rounded-2xl shadow-2xl max-w-3xl w-full mx-4 max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-border shrink-0">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <code id="mdClient" class="text-accent text-sm font-mono"></code>
+            <span id="mdTime" class="text-xs text-muted"></span>
+            <span id="mdExit" class="text-xs"></span>
+          </div>
+          <button onclick="closeDetail()" class="text-muted hover:text-white transition-colors p-1 -mr-1" title="关闭">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="p-6 overflow-y-auto space-y-4">
+          <div>
+            <div class="text-[10px] text-muted uppercase tracking-wide mb-1">命令</div>
+            <code id="mdCmd" class="block text-sm font-mono text-gray-200 bg-surface px-3 py-2.5 rounded-lg whitespace-pre-wrap break-all"></code>
+          </div>
+          <div class="flex flex-wrap gap-x-8 gap-y-2 text-xs text-muted">
+            <div><span class="text-[10px] uppercase tracking-wide">工作目录</span> <code id="mdCwd" class="font-mono ml-1"></code></div>
+            <div><span class="text-[10px] uppercase tracking-wide">耗时</span> <span id="mdDuration" class="font-mono ml-1"></span></div>
+          </div>
+          <div>
+            <div class="text-[10px] text-muted uppercase tracking-wide mb-1">标准输出 <span id="mdOutSize" class="font-normal"></span></div>
+            <pre id="mdOut" class="text-xs text-gray-300 bg-surface px-3 py-2.5 rounded-lg overflow-x-auto max-h-72 overflow-y-auto whitespace-pre-wrap break-all"></pre>
+          </div>
+          <div>
+            <div class="text-[10px] text-muted uppercase tracking-wide mb-1">标准错误 <span id="mdErrSize" class="font-normal"></span></div>
+            <pre id="mdErr" class="text-xs text-red/70 bg-surface px-3 py-2.5 rounded-lg overflow-x-auto max-h-72 overflow-y-auto whitespace-pre-wrap break-all"></pre>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
 {% endblock %}
 {% block scripts %}
