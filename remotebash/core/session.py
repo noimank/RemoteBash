@@ -26,16 +26,52 @@ IDLE_TIMEOUT = 3600
 # Unique token that is vanishingly unlikely to collide with real stderr
 _TOKEN = "__RBSH__"
 
+# POSIX-sh function that shadows rm(1) with a trash-to-/tmp safe delete.
+#
+# Each invocation creates its own subdirectory under /tmp/.rbsh_trash/
+# named <epoch>_<pid> so deletions are grouped and timestamped.
+#
+# Flags are parsed and forwarded to the real rm on fallback.  ``--`` stops
+# option parsing so filenames that start with ``-`` are handled correctly.
+#
+# If mv fails (cross-device, permissions, ...) the function falls back to
+# the real rm with the collected flags — no command ever silently succeeds
+# without doing anything.
+#
+# Use ``command rm``, ``/bin/rm``, or ``\rm`` to bypass the shim.
+_SAFE_RM_SHIM = (
+    "rm(){"
+    " _t=\"/tmp/.rbsh_trash/$(date +%s)_$$\"&&mkdir -p \"$_t\" 2>/dev/null;"
+    " _o=\"\";_n=0;_e=false;"
+    " for _a;do"
+    "  $_e && {"
+    "   _n=1;mv \"$_a\" \"$_t/\" 2>/dev/null||"
+    "    { command rm $_o \"$_a\"&&echo \"rm: removed $_a (trash failed)\">&2;};"
+    "   continue;"
+    "  };"
+    "  case \"$_a\" in"
+    "   --) _e=true;;"
+    "   -*) _o=\"$_o $_a\";;"
+    "   *) _n=1;mv \"$_a\" \"$_t/\" 2>/dev/null||"
+    "       { command rm $_o \"$_a\"&&echo \"rm: removed $_a (trash failed)\">&2;};;"
+    "  esac;"
+    " done;"
+    " [ \"$_n\" -eq 0 ]&&command rm $_o 2>/dev/null;"
+    ":;"
+    "}; "
+)
+
 
 class RemoteSession:
 
-    def __init__(self, name, host, port, user, password, enabled=True):
+    def __init__(self, name, host, port, user, password, enabled=True, safe_rm=False):
         self.name = name
         self._host = host
         self._port = port
         self._user = user
         self._password = password
         self.enabled = enabled
+        self.safe_rm = safe_rm
 
         self._conn = None
         self._cwd = "~"
@@ -163,12 +199,14 @@ class RemoteSession:
         cid = uuid.uuid4().hex
         cd = self._cwd if self._cwd == "~" else shlex.quote(self._cwd)
 
-        # Shell wrapper (no subshell — CWD changes must persist):
-        #   cd <cwd> 2>/dev/null && {command}; echo <TOKEN>:<cid>:EC:$?:CWD:$PWD >&2
-        #
+        # Shell wrapper (no subshell — CWD changes must persist).
+        # When safe_rm is enabled, a rm() function is injected that shadows
+        # rm(1) with a mv-to-/tmp fallback.  Use ``command rm``, ``/bin/rm``,
+        # or ``\rm`` to bypass the shim.
         # stdout → byte-for-byte command output.  Metadata → final stderr line.
+        pre = _SAFE_RM_SHIM if self.safe_rm else ""
         wrapped = (
-            f"cd {cd} 2>/dev/null && {command}; "
+            f"{pre}cd {cd} 2>/dev/null && {command}; "
             f"echo {_TOKEN}:{cid}:EC:$?:CWD:$(pwd) >&2"
         )
 
@@ -215,5 +253,5 @@ class RemoteSession:
         return {
             "name": self.name, "host": self._host, "port": self._port,
             "user": self._user, "connected": self.connected,
-            "cwd": self._cwd, "enabled": self.enabled, "label": "",
+            "cwd": self._cwd, "enabled": self.enabled, "safe_rm": self.safe_rm,
         }

@@ -44,13 +44,13 @@ def register_tools(mcp):
         """List configured remote hosts.
 
         Use the returned ``name`` as ``client_name`` for ``RemoteShell``.
-        Fields: ``name``, ``host``, ``port``, ``user``, ``cwd``, ``label``.
+        Fields: ``name``, ``host``, ``port``, ``user``, ``cwd``, ``safe_rm``.
 
         Empty list means nothing is configured — one item with
         ``_message`` guides the user to the web dashboard.
         """
         mgr = ctx.lifespan_context["manager"]
-        clients = [{k: c[k] for k in ("name", "host", "port", "user", "cwd", "label")}
+        clients = [{k: c[k] for k in ("name", "host", "port", "user", "cwd", "safe_rm")}
                     for c in mgr.list_enabled()]
         if not clients:
             return [{"_message": (

@@ -32,15 +32,15 @@ async def add_client(request: Request):
     if not all(c.isalnum() or c in "-_" for c in name):
         return JSONResponse({"error": "name: only alphanumeric, hyphens, underscores"}, status_code=400)
 
-    label = body.get("label", "").strip()
     enabled = body.get("enabled", True)
+    safe_rm = body.get("safe_rm", False)
     auto_connect = body.get("auto_connect", True)
     port = int(body.get("port", 22))
 
     mgr = _mgr(request)
     try:
         info = await mgr.add(name=name, host=host, user=user, password=password,
-                             port=port, label=label, enabled=enabled)
+                             port=port, enabled=enabled, safe_rm=safe_rm)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=409)
 
@@ -48,7 +48,6 @@ async def add_client(request: Request):
         try:
             await mgr.get(name).connect()
             info = mgr.get(name).to_dict()
-            info["label"] = label
         except Exception as exc:
             return JSONResponse({"error": f"Added but connect failed: {exc}", "name": name}, status_code=500)
 
@@ -111,11 +110,14 @@ async def update_client(client_name: str, request: Request):
 @router.get("/audit")
 async def list_audit(request: Request,
                      client_name: str | None = Query(None),
+                     after: str | None = Query(None, description="ISO 8601 start (inclusive)"),
+                     before: str | None = Query(None, description="ISO 8601 end (exclusive)"),
                      limit: int = Query(200, ge=1, le=1000),
                      offset: int = Query(0, ge=0)):
     mgr = _mgr(request)
-    entries = await mgr.audit_list(client_name=client_name, limit=limit, offset=offset)
-    total = await mgr.audit_count(client_name=client_name)
+    entries = await mgr.audit_list(client_name=client_name, after=after, before=before,
+                                   limit=limit, offset=offset)
+    total = await mgr.audit_count(client_name=client_name, after=after, before=before)
     return {"entries": entries, "total": total, "limit": limit, "offset": offset}
 
 

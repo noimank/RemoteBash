@@ -56,7 +56,7 @@ async function loadClientFilter() {
     const sel = document.getElementById("filterClient");
     sel.innerHTML = '<option value="">全部主机</option>';
     clients.forEach(c => {
-      sel.innerHTML += `<option value="${c.name}">${c.label ? c.label + " (" + c.name + ")" : c.name}</option>`;
+      sel.innerHTML += `<option value="${c.name}">${c.name}</option>`;
     });
   } catch (e) { /* 忽略 */ }
 }
@@ -170,17 +170,37 @@ function nextPage() {
 // 数据获取
 // ---------------------------------------------------------------------------
 
+function toISO(val) {
+  // datetime-local → ISO 8601 (UTC).  Empty string → null.
+  if (!val) return null;
+  return new Date(val).toISOString();
+}
+
 async function refreshAudit() {
   const client = document.getElementById("filterClient").value;
+  const after = toISO(document.getElementById("filterAfter").value);
+  const before = toISO(document.getElementById("filterBefore").value);
+
+  const btn = document.querySelector("button[onclick='refreshAudit()']");
+  const origText = btn ? btn.textContent : "筛选";
+  if (btn) { btn.textContent = "筛选…"; btn.disabled = true; }
+
   let url = AUDIT_API + "?limit=" + PAGE_SIZE + "&offset=" + (currentPage * PAGE_SIZE);
   if (client) url += "&client_name=" + encodeURIComponent(client);
+  if (after) url += "&after=" + encodeURIComponent(after);
+  if (before) url += "&before=" + encodeURIComponent(before);
+
   try {
     const data = await api("GET", url);
     totalEntries = data.total;
     renderAudit(data.entries);
     updatePagination();
     document.getElementById("totalCount").textContent = "（共 " + totalEntries + " 条）";
-  } catch (e) { toast(e.message, true); }
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    if (btn) { btn.textContent = origText; btn.disabled = false; }
+  }
 }
 
 async function clearAudit() {
@@ -201,6 +221,14 @@ async function clearAudit() {
 // ---------------------------------------------------------------------------
 
 document.getElementById("filterClient").onchange = () => { currentPage = 0; refreshAudit(); };
+
+function clearFilters() {
+  document.getElementById("filterClient").value = "";
+  document.getElementById("filterAfter").value = "";
+  document.getElementById("filterBefore").value = "";
+  currentPage = 0;
+  refreshAudit();
+}
 
 // ---------------------------------------------------------------------------
 // 初始化

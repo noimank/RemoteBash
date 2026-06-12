@@ -23,6 +23,29 @@
       }
     }
   </script>
+  <style>
+    /* 强制浏览器以暗色模式渲染原生日期/时间控件 */
+    input[type="datetime-local"] {
+      color-scheme: dark;
+    }
+    /* 日期控件 placeholder 占位文字颜色 */
+    input[type="datetime-local"]::-webkit-datetime-edit-text,
+    input[type="datetime-local"]::-webkit-datetime-edit-month-field,
+    input[type="datetime-local"]::-webkit-datetime-edit-day-field,
+    input[type="datetime-local"]::-webkit-datetime-edit-year-field,
+    input[type="datetime-local"]::-webkit-datetime-edit-hour-field,
+    input[type="datetime-local"]::-webkit-datetime-edit-minute-field {
+      color: #8b949e;
+    }
+    /* 日历/时钟图标 */
+    input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+      filter: invert(0.7);
+    }
+    /* 已设值时的文字颜色 */
+    input[type="datetime-local"]::-webkit-datetime-edit-fields-wrapper {
+      color: #e2e8f0;
+    }
+  </style>
   {% block head_extra %}{% endblock %}
 </head>
 <body class="bg-surface text-gray-200 min-h-screen font-sans antialiased">

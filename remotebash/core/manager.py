@@ -10,7 +10,6 @@ class ConnectionManager:
     def __init__(self, db: aiosqlite.Connection):
         self.db = db
         self._sessions: dict[str, RemoteSession] = {}
-        self._labels: dict[str, str] = {}
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -21,10 +20,10 @@ class ConnectionManager:
             name = row["name"]
             s = RemoteSession(name=name, host=row["host"], port=row["port"],
                               user=row["user"], password=row["password"],
-                              enabled=bool(row["enabled"]))
+                              enabled=bool(row["enabled"]),
+                              safe_rm=bool(row["safe_rm"]))
             s.set_audit_callback(self._on_audit)
             self._sessions[name] = s
-            self._labels[name] = row["label"]
 
     async def close(self):
         for s in self._sessions.values():
@@ -48,28 +47,26 @@ class ConnectionManager:
 
     # ── Clients ───────────────────────────────────────────────────
 
-    async def add(self, name, host, user, password, port=22, label="", enabled=True):
+    async def add(self, name, host, user, password, port=22, enabled=True, safe_rm=False):
         if name in self._sessions:
             raise ValueError(f"Client '{name}' already exists.")
         await self.db.execute(
-            """INSERT INTO clients (name, host, port, "user", password, label, enabled)
-               VALUES (:n, :h, :p, :u, :pw, :l, :e)""",
-            dict(n=name, h=host, p=port, u=user, pw=password, l=label, e=int(enabled)),
+            """INSERT INTO clients (name, host, port, "user", password, enabled, safe_rm)
+               VALUES (:n, :h, :p, :u, :pw, :e, :sr)""",
+            dict(n=name, h=host, p=port, u=user, pw=password, e=int(enabled), sr=int(safe_rm)),
         )
         await self.db.commit()
 
         s = RemoteSession(name=name, host=host, port=port, user=user,
-                          password=password, enabled=enabled)
+                          password=password, enabled=enabled, safe_rm=safe_rm)
         s.set_audit_callback(self._on_audit)
         self._sessions[name] = s
-        self._labels[name] = label
         return self._to_dict(name)
 
     async def remove(self, name):
         if name not in self._sessions:
             raise KeyError(f"Client '{name}' not found.")
         await self._sessions.pop(name).disconnect()
-        self._labels.pop(name, None)
         await self.db.execute("DELETE FROM clients WHERE name=?", (name,))
         await self.db.commit()
 
@@ -79,10 +76,10 @@ class ConnectionManager:
         s = self._sessions[name]
         if "enabled" in fields:
             s.enabled = bool(fields["enabled"])
-        if "label" in fields:
-            self._labels[name] = fields["label"]
+        if "safe_rm" in fields:
+            s.safe_rm = bool(fields["safe_rm"])
 
-        allowed = {"host", "port", "user", "password", "label", "enabled"}
+        allowed = {"host", "port", "user", "password", "enabled", "safe_rm"}
         updates = {k: v for k, v in fields.items() if k in allowed}
         if updates:
             updates["name"] = name
@@ -112,23 +109,60 @@ class ConnectionManager:
 
     # ── Audit queries ─────────────────────────────────────────────
 
-    async def audit_list(self, client_name=None, limit=200, offset=0):
+    @staticmethod
+    def _iso_to_sqlite(iso: str | None) -> str | None:
+        """Normalize ISO 8601 to SQLite datetime format for string comparison.
+
+        ``2026-06-12T11:30:00.123Z`` → ``2026-06-12 11:30:00``.
+        """
+        if not iso:
+            return None
+        # Strip trailing timezone / fractional seconds, replace T with space.
+        s = iso.strip()
+        if "T" in s:
+            s = s.split("T")[0] + " " + s.split("T")[1][:8]
+        return s
+
+    async def audit_list(self, client_name=None, after=None, before=None, limit=200, offset=0):
+        where = []
+        params = []
         if client_name:
-            cur = await self.db.execute(
-                "SELECT * FROM audit_log WHERE client_name=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (client_name, limit, offset),
-            )
-        else:
-            cur = await self.db.execute(
-                "SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset),
-            )
+            where.append("client_name=?")
+            params.append(client_name)
+        after = self._iso_to_sqlite(after)
+        before = self._iso_to_sqlite(before)
+        if after:
+            where.append("created_at>=?")
+            params.append(after)
+        if before:
+            where.append("created_at<?")
+            params.append(before)
+        sql = "SELECT * FROM audit_log"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        cur = await self.db.execute(sql, params)
         return [dict(r) for r in await cur.fetchall()]
 
-    async def audit_count(self, client_name=None):
+    async def audit_count(self, client_name=None, after=None, before=None):
+        where = []
+        params = []
         if client_name:
-            cur = await self.db.execute("SELECT COUNT(*) AS cnt FROM audit_log WHERE client_name=?", (client_name,))
-        else:
-            cur = await self.db.execute("SELECT COUNT(*) AS cnt FROM audit_log")
+            where.append("client_name=?")
+            params.append(client_name)
+        after = self._iso_to_sqlite(after)
+        before = self._iso_to_sqlite(before)
+        if after:
+            where.append("created_at>=?")
+            params.append(after)
+        if before:
+            where.append("created_at<?")
+            params.append(before)
+        sql = "SELECT COUNT(*) AS cnt FROM audit_log"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        cur = await self.db.execute(sql, params)
         return (await cur.fetchone())["cnt"]
 
     async def audit_delete(self, entry_id=None, client_name=None, before_id=None):
@@ -146,6 +180,4 @@ class ConnectionManager:
     # ── Internal ──────────────────────────────────────────────────
 
     def _to_dict(self, name):
-        d = self._sessions[name].to_dict()
-        d["label"] = self._labels.get(name, "")
-        return d
+        return self._sessions[name].to_dict()

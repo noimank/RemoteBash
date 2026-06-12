@@ -6,6 +6,7 @@
     {% include "partials/add_form.html.j2" %}
     {% include "partials/client_list.html.j2" %}
   </main>
+  {% include "partials/edit_modal.html.j2" %}
 {% endblock %}
 {% block scripts %}
   <script src="{{ url_for('static', path='js/app.js') }}"></script>

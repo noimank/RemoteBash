@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS clients (
     port        INTEGER NOT NULL DEFAULT 22,
     "user"      TEXT NOT NULL,
     password    TEXT NOT NULL,
-    label       TEXT DEFAULT '',
+    safe_rm     INTEGER NOT NULL DEFAULT 0,
     enabled     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 
 
 async def open_db(path: str | Path) -> aiosqlite.Connection:
-    """Open and migrate the database.  Creates parent dirs if needed."""
+    """Open and initialise the database.  Creates parent dirs if needed."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     db = await aiosqlite.connect(str(p))
