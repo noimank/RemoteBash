@@ -103,7 +103,7 @@ def create_app(config: ServerConfig) -> FastAPI:
 def main() -> None:
     parser = argparse.ArgumentParser(description="RemoteBash — MCP server with web dashboard.")
     parser.add_argument("--transport", choices=["http", "sse"], default="http")
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=24587)
     parser.add_argument("--db", default=None,
                         help=f"SQLite path (default: {DEFAULT_DB})")

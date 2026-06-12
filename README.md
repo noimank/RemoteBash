@@ -92,13 +92,13 @@ uv run remotebash --debug
 remotebash [OPTIONS]
 
   --transport http|sse   传输协议，默认 http
-  --host 0.0.0.0        监听地址
+  --host 127.0.0.1      监听地址
   --port 24587          监听端口
   --db <path>           SQLite 路径（默认 ~/.remotebash/remotebash.db）
   --debug               调试日志
 ```
 
-> **安全提示**：默认监听 `0.0.0.0`，意味着局域网内其他设备也可以访问仪表盘和 MCP 端点。如需仅本机访问，请使用 `--host 127.0.0.1`。
+> **安全提示**：默认监听 `127.0.0.1`，仅本机可访问。如需让局域网内其他设备访问仪表盘和 MCP 端点，请使用 `--host 0.0.0.0`。
 
 ## 接入各 AI 智能体
 
