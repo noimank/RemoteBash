@@ -110,18 +110,29 @@ async function refresh() {
 document.getElementById("addForm").onsubmit = async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
+  const body = {
+    name: fd.get("name"),
+    host: fd.get("host"),
+    port: +fd.get("port") || 22,
+    user: fd.get("user"),
+    password: fd.get("password"),
+  };
   try {
-    await api("POST", CLIENTS_API, {
-      name: fd.get("name"),
-      host: fd.get("host"),
-      port: +fd.get("port") || 22,
-      user: fd.get("user"),
-      password: fd.get("password"),
-    });
+    await api("POST", CLIENTS_API, body);
     e.target.reset();
     toast("已添加并连接");
-    refresh();
-  } catch (e) { toast(e.message, true); }
+  } catch (err) {
+    // 客户端可能已入库，只是自动连接失败 — 尝试解析后端返回的 JSON
+    let msg = err.message;
+    let added = false;
+    try {
+      const data = JSON.parse(err.message);
+      if (data.name) { added = true; msg = data.error || msg; }
+    } catch (_) { /* 非 JSON 响应，按普通错误处理 */ }
+    toast(msg, !added);
+    if (!added) return; // 真正的入库失败（409 等），不重置表单也不刷新
+  }
+  refresh();
 };
 
 async function connect(name)    { try { await api("POST", CLIENTS_API + "/" + name + "/connect");    toast("已连接");  refresh(); } catch (e) { toast(e.message, true); } }
