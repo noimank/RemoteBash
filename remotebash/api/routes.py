@@ -1,5 +1,8 @@
 """FastAPI REST routes — clients & audit."""
 
+import asyncio
+
+import asyncssh
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
@@ -86,12 +89,46 @@ async def disconnect_client(client_name: str, request: Request):
 @router.post("/clients/{client_name}/test")
 async def test_client(client_name: str, request: Request):
     try:
-        await _mgr(request).get(client_name).test_connection()
-        return {"ok": True, "name": client_name}
+        s = _mgr(request).get(client_name)
     except KeyError:
-        return JSONResponse({"error": f"Client '{client_name}' not found"}, status_code=404)
+        return JSONResponse({"error": f"客户端 '{client_name}' 不存在"}, status_code=404)
+
+    try:
+        await s.test_connection()
+    except asyncio.TimeoutError:
+        return JSONResponse({
+            "error": f"连接超时 — 无法在 10 秒内连接到 {s.host}:{s.port}，请检查网络或防火墙",
+            "host": s.host, "port": s.port,
+        }, status_code=504)
+    except asyncssh.AuthenticationError as exc:
+        return JSONResponse({
+            "error": f"认证失败 — 用户名或密码错误 ({s.user}@{s.host}:{s.port})",
+            "host": s.host, "port": s.port,
+        }, status_code=401)
+    except (asyncssh.Error, OSError) as exc:
+        msg = str(exc).lower()
+        if "refused" in msg or "refused" in str(exc):
+            detail = f"连接被拒绝 — {s.host}:{s.port} 端口未开放或 SSH 服务未运行"
+        elif "no address" in msg or "resolve" in msg or "name" in msg:
+            detail = f"无法解析主机名 — {s.host}，请检查主机地址是否正确"
+        elif "no route" in msg or "unreachable" in msg or "network" in msg:
+            detail = f"网络不可达 — 无法访问 {s.host}:{s.port}"
+        else:
+            detail = f"连接失败 — {s.host}:{s.port}，{exc}"
+        return JSONResponse({
+            "error": detail,
+            "host": s.host, "port": s.port,
+        }, status_code=500)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return JSONResponse({
+            "error": f"连接测试失败: {exc}",
+            "host": s.host, "port": s.port,
+        }, status_code=500)
+
+    return {
+        "ok": True, "name": client_name,
+        "host": s.host, "port": s.port, "user": s.user,
+    }
 
 
 @router.patch("/clients/{client_name}")

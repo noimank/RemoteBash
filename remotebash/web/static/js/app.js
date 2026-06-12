@@ -129,7 +129,10 @@ async function disconnect(name) { try { await api("POST", CLIENTS_API + "/" + na
 
 async function testConnect(name) {
   toast("测试中…");
-  try { await api("POST", CLIENTS_API + "/" + name + "/test"); toast("连接正常"); } catch (e) { toast(e.message, true); }
+  try {
+    const data = await api("POST", CLIENTS_API + "/" + name + "/test");
+    toast("连接正常 — " + data.user + "@" + data.host + ":" + data.port);
+  } catch (e) { toast(e.message, true); }
 }
 
 async function disableClient(name) {
