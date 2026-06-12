@@ -3,6 +3,7 @@
 通过 MCP 将 SSH 连接暴露给 Claude 等 AI 智能体，在远程主机上执行命令。
 
 - **MCP 原生**：一键接入 Claude Desktop，无需配置
+- **文件传输**：通过 SFTP 上传/下载，自动展开 `~` 路径
 - **Web 仪表盘**：可视化管理多台 SSH 主机
 - **工作目录持久**：`cd` 后上下文自动保留
 - **命令审计**：每次执行全量记录至 SQLite
@@ -94,6 +95,7 @@ goose configure
 | 工具 | 说明 |
 |------|------|
 | `RemoteShell` | 在远程主机执行命令 |
+| `DataTransfer` | SFTP 文件传输（上传/下载） |
 | `ListRemoteClients` | 列出所有已启用的主机 |
 
 ## 命令行参数

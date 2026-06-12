@@ -1,4 +1,4 @@
-"""MCP tools — RemoteShell() and ListRemoteClients()."""
+"""MCP tools — RemoteShell(), DataTransfer(), and ListRemoteClients()."""
 
 import logging
 
@@ -24,6 +24,9 @@ def register_tools(mcp):
 
         Increase **timeout** for long-running commands (build, install, large
         transfer); the default kills at 30 s.
+
+        For file transfer prefer ``DataTransfer`` over shell commands
+        like ``cp`` or ``scp``.
 
         Returns ``{stdout, stderr, exit_code, cwd}``.
         """
@@ -56,3 +59,32 @@ def register_tools(mcp):
                 "ListRemoteClients again."
             )}]
         return clients
+
+    @mcp.tool
+    async def DataTransfer(client_name: str, src: str, dst: str,
+                           direction: str = "remote2local",
+                           ctx: Context = CurrentContext()) -> dict:
+        """Transfer files between local and remote host via SFTP.
+
+        Call ``ListRemoteClients`` first to get valid **client_name** values.
+
+        **direction** must be one of:
+        - ``remote2local`` — download **src** from remote to **dst** on local
+        - ``local2remote`` — upload **src** from local to **dst** on remote
+
+        Returns ``{success, direction, src, dst, size_bytes, duration_ms}``.
+        """
+        if direction not in ("remote2local", "local2remote"):
+            raise ToolError(
+                f"Invalid direction '{direction}'. "
+                "Expected 'remote2local' or 'local2remote'."
+            )
+        mgr = ctx.lifespan_context["manager"]
+        try:
+            session = mgr.get(client_name)
+        except KeyError as e:
+            logger.warning("Client '%s' not found", client_name)
+            raise ToolError(str(e), log_level=logging.INFO) from None
+        result = await session.transfer(src, dst, direction)
+        return {k: result[k] for k in ("success", "direction", "src", "dst",
+                                        "size_bytes", "duration_ms")}

@@ -11,12 +11,15 @@ before the result is returned, so:
 * **exit_code** and **cwd** are parsed from the anchor line.
 """
 
+import logging
 import re
 import shlex
 import time
 import uuid
 
 import asyncssh
+
+logger = logging.getLogger(__name__)
 
 IDLE_TIMEOUT = 3600
 
@@ -68,6 +71,76 @@ class RemoteSession:
                 await conn.wait_closed()
             except Exception:
                 pass
+
+    async def _expand_remote_path(self, path):
+        """Resolve ``~`` in a remote path.
+
+        SFTP does not expand ``~`` and asyncssh ``run()`` does not invoke a
+        shell.  We fetch ``$HOME`` and replace the leading ``~`` ourselves.
+        """
+        if "~" not in path:
+            return path
+        result = await self._conn.run("echo $HOME", timeout=5)
+        home = (result.stdout or "").strip()
+        if home:
+            if path == "~":
+                return home
+            if path.startswith("~/"):
+                return home + path[1:]
+        return path  # includes ~user/ fallback — leave as-is
+
+    async def transfer(self, src, dst, direction):
+        """Transfer a file via SFTP.
+
+        ``direction``: ``remote2local`` (download) or ``local2remote`` (upload).
+        Remote paths may use ``~`` which will be shell-expanded.
+
+        Returns ``{success, direction, src, dst, size_bytes}``.
+        """
+        if not self.enabled:
+            raise RuntimeError(f"Client '{self.name}' is disabled.")
+
+        if self.connected and (time.monotonic() - self._last_activity) > IDLE_TIMEOUT:
+            await self.disconnect()
+        if not self.connected:
+            await self.connect()
+
+        # Resolve ~ in the remote-side path (SFTP doesn't expand it).
+        if direction == "remote2local":
+            src = await self._expand_remote_path(src)
+        else:
+            dst = await self._expand_remote_path(dst)
+
+        t0 = time.monotonic()
+        try:
+            async with self._conn.start_sftp_client() as sftp:
+                if direction == "remote2local":
+                    await sftp.get(src, dst)
+                elif direction == "local2remote":
+                    await sftp.put(src, dst)
+                else:
+                    raise ValueError(
+                        f"Invalid direction '{direction}'. "
+                        "Expected 'remote2local' or 'local2remote'."
+                    )
+                stat = await sftp.stat(dst if direction == "local2remote" else src)
+                size = stat.size
+        except (asyncssh.Error, OSError, TimeoutError) as exc:
+            await self.disconnect()
+            raise RuntimeError(f"SFTP transfer failed: {exc}") from exc
+
+        self._last_activity = time.monotonic()
+        elapsed = int((self._last_activity - t0) * 1000)
+        logger.info("Transfer %s -> %s (%s) done in %d ms, %d bytes",
+                    src, dst, direction, elapsed, size)
+        return {
+            "success": True,
+            "direction": direction,
+            "src": src,
+            "dst": dst,
+            "size_bytes": size,
+            "duration_ms": elapsed,
+        }
 
     async def test_connection(self):
         conn = await asyncssh.connect(
