@@ -9,6 +9,7 @@ const PAGE_SIZE = 50;
 let currentPage = 0;
 let totalEntries = 0;
 let currentEntries = [];
+let selectedIds = new Set();
 
 // ---------------------------------------------------------------------------
 // 提示
@@ -118,6 +119,9 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeDetail(
 function renderAudit(entries) {
   const list = document.getElementById("auditList");
   currentEntries = entries;
+  selectedIds.clear();
+  updateSelectionUI();
+
   if (!entries.length) {
     list.innerHTML = '<div class="text-center py-12 text-muted text-sm">暂无审计记录。</div>';
     return;
@@ -128,6 +132,8 @@ function renderAudit(entries) {
     return `
     <div class="bg-surface border border-border rounded-lg hover:border-border-hover transition-colors group">
       <div class="flex items-center gap-1.5 px-3 py-2">
+        <input type="checkbox" class="audit-checkbox w-3.5 h-3.5 rounded border-border accent-accent cursor-pointer shrink-0"
+               data-id="${e.id}" onchange="toggleSelect(${e.id}, this.checked)" title="选择此条记录">
         ${hasOut ? '<span class="w-1.5 h-1.5 rounded-full bg-green shrink-0" title="stdout: ' + formatSize(e.stdout.length) + '"></span>' : ''}
         ${hasErr ? '<span class="w-1.5 h-1.5 rounded-full bg-red shrink-0" title="stderr: ' + formatSize(e.stderr.length) + '"></span>' : ''}
         <span class="text-[11px] text-muted w-[160px] shrink-0">${formatTime(e.created_at)}</span>
@@ -136,6 +142,7 @@ function renderAudit(entries) {
         <span class="text-[11px] text-muted w-[46px] text-right shrink-0">${e.duration_ms}ms</span>
         ${exitBadge(e.exit_code)}
         <button onclick="openDetail(${i})" class="ml-1 rounded-md border border-border hover:border-accent hover:text-accent text-muted text-[11px] px-2 py-0.5 transition-colors shrink-0 font-medium">详情</button>
+        <button onclick="deleteEntry(${e.id})" class="rounded-md border border-transparent hover:border-red/30 hover:text-red text-muted text-[11px] px-1.5 py-0.5 transition-colors shrink-0 opacity-0 group-hover:opacity-100 font-medium" title="删除此条记录">&times;</button>
       </div>
     </div>`;
   }).join("");
@@ -209,6 +216,87 @@ async function clearAudit() {
     currentPage = 0;
     refreshAudit();
   } catch (e) { toast(e.message, true); }
+}
+
+// ---------------------------------------------------------------------------
+// 选择与批量删除
+// ---------------------------------------------------------------------------
+
+function toggleSelect(id, checked) {
+  if (checked) {
+    selectedIds.add(id);
+  } else {
+    selectedIds.delete(id);
+  }
+  updateSelectionUI();
+}
+
+function toggleSelectAll(checked) {
+  currentEntries.forEach(e => {
+    if (checked) {
+      selectedIds.add(e.id);
+    } else {
+      selectedIds.delete(e.id);
+    }
+  });
+  // Sync all checkboxes on current page
+  document.querySelectorAll(".audit-checkbox").forEach(cb => {
+    cb.checked = checked;
+  });
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  const btn = document.getElementById("deleteSelectedBtn");
+  const selectAll = document.getElementById("selectAllCheckbox");
+  const count = selectedIds.size;
+
+  if (count > 0) {
+    btn.classList.remove("hidden");
+    btn.textContent = "删除选中 (" + count + ")";
+  } else {
+    btn.classList.add("hidden");
+  }
+
+  // Sync select-all checkbox with current page state
+  if (currentEntries.length > 0) {
+    const allChecked = currentEntries.every(e => selectedIds.has(e.id));
+    const noneChecked = currentEntries.every(e => !selectedIds.has(e.id));
+    selectAll.checked = allChecked;
+    selectAll.indeterminate = !allChecked && !noneChecked;
+  } else {
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
+  }
+}
+
+async function deleteEntry(id) {
+  if (!confirm("确定删除此条审计记录？")) return;
+  try {
+    await api("DELETE", AUDIT_API + "?entry_id=" + id);
+    toast("已删除");
+    selectedIds.delete(id);
+    refreshAudit();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function deleteSelected() {
+  const count = selectedIds.size;
+  if (count === 0) return;
+  if (!confirm("确定删除选中的 " + count + " 条审计记录？")) return;
+  try {
+    const idsParam = Array.from(selectedIds).join(",");
+    await api("DELETE", AUDIT_API + "?entry_ids=" + encodeURIComponent(idsParam));
+    toast("已删除 " + count + " 条");
+    selectedIds.clear();
+    refreshAudit();
+  } catch (e) { toast(e.message, true); }
+}
+
+function clearSelection() {
+  selectedIds.clear();
+  document.querySelectorAll(".audit-checkbox").forEach(cb => { cb.checked = false; });
+  updateSelectionUI();
 }
 
 // ---------------------------------------------------------------------------

@@ -173,9 +173,13 @@ class ConnectionManager:
         cur = await self.db.execute(sql, params)
         return (await cur.fetchone())["cnt"]
 
-    async def audit_delete(self, entry_id=None, client_name=None, before_id=None):
+    async def audit_delete(self, entry_id=None, entry_ids=None, client_name=None, before_id=None):
         if entry_id is not None:
             cur = await self.db.execute("DELETE FROM audit_log WHERE id=?", (entry_id,))
+        elif entry_ids:
+            placeholders = ",".join("?" * len(entry_ids))
+            cur = await self.db.execute(
+                f"DELETE FROM audit_log WHERE id IN ({placeholders})", entry_ids)
         elif client_name is not None:
             cur = await self.db.execute("DELETE FROM audit_log WHERE client_name=?", (client_name,))
         elif before_id is not None:

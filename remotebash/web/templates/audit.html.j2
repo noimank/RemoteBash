@@ -10,6 +10,12 @@
         <span id="totalCount" class="text-xs text-muted font-normal ml-1"></span>
       </h2>
       <div class="flex flex-wrap items-center gap-3 mb-4 shrink-0 bg-surface rounded-xl border border-border p-3">
+        <label class="flex items-center gap-1 cursor-pointer select-none shrink-0" title="全选/取消全选当前页">
+          <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)"
+            class="w-3.5 h-3.5 rounded border-border accent-accent cursor-pointer">
+          <span class="text-[11px] text-muted">全选</span>
+        </label>
+        <span class="text-border">|</span>
         <div class="flex items-center gap-1.5">
           <svg class="w-3.5 h-3.5 text-muted shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
           <select id="filterClient" class="rounded-lg bg-surface border border-border px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent min-w-[130px]">
@@ -28,6 +34,7 @@
         </div>
         <button type="button" onclick="refreshAudit()" class="rounded-lg bg-accent hover:bg-accent-hover text-white text-xs px-4 py-2 transition-colors font-medium">筛选</button>
         <button type="button" onclick="clearFilters()" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium">重置</button>
+        <button type="button" id="deleteSelectedBtn" onclick="deleteSelected()" class="rounded-lg border border-red/30 hover:bg-red/10 text-red text-xs px-3 py-1.5 transition-colors font-medium hidden">删除选中</button>
         <button type="button" onclick="clearAudit()" class="rounded-lg border border-red/30 hover:bg-red/10 text-red text-xs px-3 py-1.5 transition-colors font-medium ml-auto">清除当前</button>
       </div>
       <div id="auditList" class="space-y-1.5 flex-1 overflow-y-auto min-h-0">

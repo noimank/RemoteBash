@@ -166,8 +166,12 @@ async def list_audit(request: Request,
 @router.delete("/audit")
 async def delete_audit(request: Request,
                        entry_id: int | None = Query(None),
+                       entry_ids: str | None = Query(None, description="Comma-separated IDs for batch delete"),
                        client_name: str | None = Query(None),
                        before_id: int | None = Query(None)):
+    ids = None
+    if entry_ids:
+        ids = [int(x.strip()) for x in entry_ids.split(",") if x.strip()]
     deleted = await _mgr(request).audit_delete(
-        entry_id=entry_id, client_name=client_name, before_id=before_id)
+        entry_id=entry_id, entry_ids=ids, client_name=client_name, before_id=before_id)
     return {"ok": True, "deleted": deleted}
