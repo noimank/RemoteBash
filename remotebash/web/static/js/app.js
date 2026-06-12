@@ -69,17 +69,17 @@ function renderClient(c) {
         <button onclick="testConnect('${c.name}')" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-2.5 py-1.5 transition-colors font-medium" title="测试连接">测试</button>
         <button onclick="editClient('${js(c.name)}','${js(c.host)}','${js(c.port)}','${js(c.user)}','')" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium" title="编辑连接信息">编辑</button>
         ${c.enabled
-          ? '<button onclick="disableClient(\'' + c.name + '\')" class="rounded-lg border border-yellow/30 hover:bg-yellow/10 text-yellow text-xs px-3 py-1.5 transition-colors font-medium">禁用</button>'
-          : '<button onclick="enableClient(\'' + c.name + '\')" class="rounded-lg border border-green/30 hover:bg-green/10 text-green text-xs px-3 py-1.5 transition-colors font-medium">启用</button>'}
+          ? `<button onclick="disableClient('${js(c.name)}')" class="rounded-lg border border-yellow/30 hover:bg-yellow/10 text-yellow text-xs px-3 py-1.5 transition-colors font-medium">禁用</button>`
+          : `<button onclick="enableClient('${js(c.name)}')" class="rounded-lg border border-green/30 hover:bg-green/10 text-green text-xs px-3 py-1.5 transition-colors font-medium">启用</button>`}
         ${c.safe_rm
-          ? '<button onclick="toggleSafeRm(\'' + c.name + '\',false)" class="rounded-lg border border-yellow/30 hover:bg-yellow/10 text-yellow text-xs px-3 py-1.5 transition-colors font-medium" title="关闭安全删除">🔰</button>'
-          : '<button onclick="toggleSafeRm(\'' + c.name + '\',true)"  class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium" title="开启安全删除 (rm→mv /tmp)">🔰</button>'}
+          ? `<button onclick="toggleSafeRm('${js(c.name)}',false)" class="rounded-lg border border-yellow/30 hover:bg-yellow/10 text-yellow text-xs px-3 py-1.5 transition-colors font-medium" title="关闭安全删除">🔰</button>`
+          : `<button onclick="toggleSafeRm('${js(c.name)}',true)"  class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium" title="开启安全删除 (rm→mv /tmp)">🔰</button>`}
         ${c.connected
-          ? '<button onclick="disconnect(\'' + c.name + '\')" class="rounded-lg border border-red/30 hover:bg-red/10 text-red text-xs px-3 py-1.5 transition-colors font-medium">断开</button>'
+          ? `<button onclick="disconnect('${js(c.name)}')" class="rounded-lg border border-red/30 hover:bg-red/10 text-red text-xs px-3 py-1.5 transition-colors font-medium">断开</button>`
           : c.enabled
-            ? '<button onclick="connect(\'' + c.name + '\')" class="rounded-lg bg-green/10 border border-green/30 hover:bg-green/20 text-green text-xs px-3 py-1.5 transition-colors font-medium">连接</button>'
+            ? `<button onclick="connect('${js(c.name)}')" class="rounded-lg bg-green/10 border border-green/30 hover:bg-green/20 text-green text-xs px-3 py-1.5 transition-colors font-medium">连接</button>`
             : ''}
-        <button onclick="removeClient(\'' + c.name + '\')" class="rounded-lg border border-border hover:border-red/40 hover:text-red text-muted text-xs px-3 py-1.5 transition-colors font-medium">&times;</button>
+        <button onclick="removeClient('${js(c.name)}')" class="rounded-lg border border-border hover:border-red/40 hover:text-red text-muted text-xs px-3 py-1.5 transition-colors font-medium">&times;</button>
       </span>
     </div>`;
 }
