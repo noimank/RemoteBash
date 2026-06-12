@@ -1,20 +1,9 @@
 """Server configuration."""
 
-import os
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-Transport = "http"  # or "sse"
-
-# Default database directory — platform-specific user data dir.
-if sys.platform == "win32":
-    _base = os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))
-elif sys.platform == "darwin":
-    _base = str(Path.home() / "Library" / "Application Support")
-else:
-    _base = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
-DEFAULT_DB = Path(_base) / "remotebash" / "remotebash.db"
+DEFAULT_DB = Path.home() / ".remotebash" / "remotebash.db"
 
 
 @dataclass

@@ -80,7 +80,7 @@ Two pages: dashboard (`/`) and audit (`/audit`). Both extend `base.html.j2` with
 
 ### Config (`remotebash/config.py`)
 
-`ServerConfig` dataclass with fields: `transport` (http/sse), `host`, `port` (default 24587), `debug`, `db_path`. The default DB path is platform-specific: `%APPDATA%/remotebash/remotebash.db` on Windows, `~/Library/Application Support/remotebash/remotebash.db` on macOS, `$XDG_DATA_HOME/remotebash/remotebash.db` or `~/.local/share/remotebash/remotebash.db` on Linux.
+`ServerConfig` dataclass with fields: `transport` (http/sse), `host`, `port` (default 24587), `debug`, `db_path`. The default DB path is `~/.remotebash/remotebash.db` on all platforms.
 
 ## Key dependencies
 
