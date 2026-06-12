@@ -1,32 +1,78 @@
-"""MCP tools — RemoteShell(), DataTransfer(), and ListRemoteClients()."""
+"""MCP tools — remote_shell(), data_transfer(), and list_remote_clients()."""
 
 import logging
+from typing import Annotated, TypedDict
 
 from fastmcp.dependencies import CurrentContext
 from fastmcp.exceptions import ToolError
 from fastmcp.server.context import Context
+from mcp.types import ToolAnnotations
+from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
 
+class RemoteShellOutput(TypedDict):
+    """Result of a remote shell command execution."""
+
+    stdout: str
+    stderr: str
+    exit_code: int
+    cwd: str
+
+
+class RemoteClientInfo(TypedDict):
+    """SSH host configuration."""
+
+    name: str
+    host: str
+    port: int
+    user: str
+    cwd: str
+    safe_rm: bool
+
+
+class DataTransferOutput(TypedDict):
+    """Result of an SFTP file transfer."""
+
+    success: bool
+    direction: str
+    src: str
+    dst: str
+    size_bytes: int
+    duration_ms: float
+
+
 def register_tools(mcp):
 
-    @mcp.tool
-    async def RemoteShell(client_name: str, command: str, timeout: int = 30,
-                          ctx: Context = CurrentContext()) -> dict:
+    @mcp.tool(
+        title="Execute Command on Remote Host",
+        annotations=ToolAnnotations(
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
+    async def remote_shell(
+        client_name: Annotated[
+            str, Field(description="Name of the remote host. Call list_remote_clients first — do not guess.")
+        ],
+        command: Annotated[
+            str, Field(description="Shell command to execute on the remote host. Pipes, redirects, and shell builtins all work.")
+        ],
+        timeout: Annotated[
+            int, Field(description="Command timeout in seconds (default: 30). Increase for builds, installs, or large transfers.")
+        ] = 30,
+        ctx: Context = CurrentContext(),
+    ) -> RemoteShellOutput:
         """Execute a command on a remote host via SSH.
 
-        Call ``ListRemoteClients`` first to get valid **client_name** values.
-        Do not guess names — use exactly what the list returns.
+        The working directory (CWD) is stateful across calls: ``cd /somewhere``
+        persists, so the next command runs in that directory.  Use ``pwd`` to
+        check the current directory at any time.
 
-        CWD is stateful across calls: ``cd /path`` persists.  To check the
-        current directory, run ``pwd``.
-
-        Increase **timeout** for long-running commands (build, install, large
-        transfer); the default kills at 30 s.
-
-        For file transfer prefer ``DataTransfer`` over shell commands
-        like ``cp`` or ``scp``.
+        For file uploads and downloads, prefer ``data_transfer`` (SFTP) over
+        shell commands like ``cp``, ``scp``, or ``cat``.
 
         Returns ``{stdout, stderr, exit_code, cwd}``.
         """
@@ -39,15 +85,21 @@ def register_tools(mcp):
         result = await session.exec(command, timeout=timeout)
         return {k: result[k] for k in ("stdout", "stderr", "exit_code", "cwd")}
 
-    @mcp.tool
-    def ListRemoteClients(ctx: Context = CurrentContext()) -> list[dict]:
-        """List configured remote hosts.
+    @mcp.tool(
+        title="List Remote Hosts",
+        annotations=ToolAnnotations(
+            readOnlyHint=True,
+            openWorldHint=False,
+        ),
+    )
+    def list_remote_clients(ctx: Context = CurrentContext()) -> list[RemoteClientInfo]:
+        """List all enabled remote hosts configured in the web dashboard.
 
-        Use the returned ``name`` as ``client_name`` for ``RemoteShell``.
-        Fields: ``name``, ``host``, ``port``, ``user``, ``cwd``, ``safe_rm``.
+        Use the returned ``name`` value as ``client_name`` for
+        ``remote_shell`` and ``data_transfer``.
 
-        Empty list means nothing is configured — one item with
-        ``_message`` guides the user to the web dashboard.
+        Returns ``[{name, host, port, user, cwd, safe_rm}, ...]``.
+        An empty list means no hosts are configured yet.
         """
         mgr = ctx.lifespan_context["manager"]
         clients = [{k: c[k] for k in ("name", "host", "port", "user", "cwd", "safe_rm")}
@@ -56,21 +108,46 @@ def register_tools(mcp):
             return [{"_message": (
                 "No remote hosts configured yet.  Open the RemoteBash dashboard at "
                 "http://localhost:24587 to add your SSH hosts, then run "
-                "ListRemoteClients again."
+                "list_remote_clients again."
             )}]
         return clients
 
-    @mcp.tool
-    async def DataTransfer(client_name: str, src: str, dst: str,
-                           direction: str = "remote2local",
-                           ctx: Context = CurrentContext()) -> dict:
-        """Transfer files between local and remote host via SFTP.
+    @mcp.tool(
+        title="Transfer Files via SFTP",
+        annotations=ToolAnnotations(
+            destructiveHint=True,
+            idempotentHint=False,
+            openWorldHint=True,
+        ),
+    )
+    async def data_transfer(
+        client_name: Annotated[
+            str, Field(description="Name of the remote host. Call list_remote_clients first — do not guess.")
+        ],
+        src: Annotated[
+            str, Field(
+                description="Source file path. When direction is 'local2remote', this is a "
+                            "**local** path; when 'remote2local', this is a **remote** path."
+            )
+        ],
+        dst: Annotated[
+            str, Field(
+                description="Destination file path. When direction is 'local2remote', this is a "
+                            "**remote** path; when 'remote2local', this is a **local** path."
+            )
+        ],
+        direction: Annotated[
+            str, Field(
+                description="Transfer direction: 'local2remote' (upload local → remote) "
+                            "or 'remote2local' (download remote → local). Default: 'local2remote'."
+            )
+        ] = "local2remote",
+        ctx: Context = CurrentContext(),
+    ) -> DataTransferOutput:
+        """Transfer files between the local machine and a remote host via SFTP.
 
-        Call ``ListRemoteClients`` first to get valid **client_name** values.
-
-        **direction** must be one of:
-        - ``remote2local`` — download **src** from remote to **dst** on local
-        - ``local2remote`` — upload **src** from local to **dst** on remote
+        For general command execution (shell commands, scripts, etc.), use
+        ``remote_shell`` instead.
 
         Returns ``{success, direction, src, dst, size_bytes, duration_ms}``.
         """

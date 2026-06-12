@@ -64,9 +64,10 @@ Holds an in-memory `dict[str, RemoteSession]` synchronized with the DB. `load()`
 
 ### MCP tools (`remotebash/api/tools.py`)
 
-Two tools:
-- `RemoteShell(client_name, command, timeout=30)` — executes a command, returns `{stdout, stderr, exit_code, cwd}`.
-- `ListRemoteClients()` — returns only **enabled** clients with `{name, host, port, user, cwd, label}`.
+Three tools:
+- `remote_shell(client_name, command, timeout=30)` — executes a command, returns `{stdout, stderr, exit_code, cwd}`.
+- `data_transfer(client_name, src, dst, direction="remote2local")` — SFTP file transfer, returns `{success, direction, src, dst, size_bytes, duration_ms}`.
+- `list_remote_clients()` — returns only **enabled** clients with `{name, host, port, user, cwd, label}`.
 
 Both access the manager via `ctx.lifespan_context["manager"]`.
 
