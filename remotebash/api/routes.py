@@ -31,9 +31,9 @@ async def add_client(request: Request):
     password = body.get("password", "")
 
     if not name or not host or not user:
-        return JSONResponse({"error": "name, host and user are required"}, status_code=400)
+        return JSONResponse({"error": "名称、主机和用户为必填项"}, status_code=400)
     if not all(c.isalnum() or c in "-_" for c in name):
-        return JSONResponse({"error": "name: only alphanumeric, hyphens, underscores"}, status_code=400)
+        return JSONResponse({"error": "名称：仅允许字母、数字、连字符和下划线"}, status_code=400)
 
     enabled = body.get("enabled", True)
     safe_rm = body.get("safe_rm", False)
@@ -52,7 +52,7 @@ async def add_client(request: Request):
             await mgr.get(name).connect()
             info = mgr.get(name).to_dict()
         except Exception as exc:
-            return JSONResponse({"error": f"Added but connect failed: {exc}", "name": name}, status_code=500)
+            return JSONResponse({"error": f"已添加但连接失败: {exc}", "name": name}, status_code=500)
 
     return info
 
@@ -63,7 +63,7 @@ async def remove_client(client_name: str, request: Request):
         await _mgr(request).remove(client_name)
         return {"ok": True}
     except KeyError:
-        return JSONResponse({"error": f"Client '{client_name}' not found"}, status_code=404)
+        return JSONResponse({"error": f"客户端 '{client_name}' 不存在"}, status_code=404)
 
 
 @router.post("/clients/{client_name}/connect")
@@ -72,7 +72,7 @@ async def connect_client(client_name: str, request: Request):
         await _mgr(request).get(client_name).connect()
         return {"ok": True, "name": client_name}
     except KeyError:
-        return JSONResponse({"error": f"Client '{client_name}' not found"}, status_code=404)
+        return JSONResponse({"error": f"客户端 '{client_name}' 不存在"}, status_code=404)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
@@ -83,7 +83,7 @@ async def disconnect_client(client_name: str, request: Request):
         await _mgr(request).get(client_name).disconnect()
         return {"ok": True, "name": client_name}
     except KeyError:
-        return JSONResponse({"error": f"Client '{client_name}' not found"}, status_code=404)
+        return JSONResponse({"error": f"客户端 '{client_name}' 不存在"}, status_code=404)
 
 
 @router.post("/clients/{client_name}/test")
@@ -100,9 +100,14 @@ async def test_client(client_name: str, request: Request):
             "error": f"连接超时 — 无法在 10 秒内连接到 {s.host}:{s.port}，请检查网络或防火墙",
             "host": s.host, "port": s.port,
         }, status_code=504)
-    except asyncssh.AuthenticationError as exc:
+    except asyncssh.PermissionDenied as exc:
         return JSONResponse({
             "error": f"认证失败 — 用户名或密码错误 ({s.user}@{s.host}:{s.port})",
+            "host": s.host, "port": s.port,
+        }, status_code=401)
+    except asyncssh.PasswordChangeRequired:
+        return JSONResponse({
+            "error": f"认证失败 — 密码已过期，需要更改密码 ({s.user}@{s.host}:{s.port})",
             "host": s.host, "port": s.port,
         }, status_code=401)
     except (asyncssh.Error, OSError) as exc:
@@ -137,7 +142,7 @@ async def update_client(client_name: str, request: Request):
     try:
         return await _mgr(request).update(client_name, **body)
     except KeyError:
-        return JSONResponse({"error": f"Client '{client_name}' not found"}, status_code=404)
+        return JSONResponse({"error": f"客户端 '{client_name}' 不存在"}, status_code=404)
 
 
 # ═══════════════════════════════════════════════════════════════════════

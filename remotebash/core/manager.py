@@ -49,7 +49,7 @@ class ConnectionManager:
 
     async def add(self, name, host, user, password, port=22, enabled=True, safe_rm=False):
         if name in self._sessions:
-            raise ValueError(f"Client '{name}' already exists.")
+            raise ValueError(f"客户端 '{name}' 已存在。")
         await self.db.execute(
             """INSERT INTO clients (name, host, port, "user", password, enabled, safe_rm)
                VALUES (:n, :h, :p, :u, :pw, :e, :sr)""",
@@ -65,14 +65,14 @@ class ConnectionManager:
 
     async def remove(self, name):
         if name not in self._sessions:
-            raise KeyError(f"Client '{name}' not found.")
+            raise KeyError(f"客户端 '{name}' 不存在。")
         await self._sessions.pop(name).disconnect()
         await self.db.execute("DELETE FROM clients WHERE name=?", (name,))
         await self.db.commit()
 
     async def update(self, name, **fields):
         if name not in self._sessions:
-            raise KeyError(f"Client '{name}' not found.")
+            raise KeyError(f"客户端 '{name}' 不存在。")
         s = self._sessions[name]
         if "enabled" in fields:
             s.enabled = bool(fields["enabled"])
@@ -105,8 +105,8 @@ class ConnectionManager:
             hint = ""
             if enabled:
                 names = ", ".join(c["name"] for c in enabled)
-                hint = f" Enabled clients: {names}."
-            raise KeyError(f"Client '{name}' not found.{hint}")
+                hint = f" 已启用的客户端: {names}。"
+            raise KeyError(f"客户端 '{name}' 不存在。{hint}")
         return self._sessions[name]
 
     def list_all(self):
