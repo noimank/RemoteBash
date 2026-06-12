@@ -82,6 +82,38 @@ class RemoteSession:
     def connected(self):
         return self._conn is not None and not self._conn.is_closed()
 
+    @property
+    def host(self):
+        return self._host
+
+    @host.setter
+    def host(self, val):
+        self._host = val
+
+    @property
+    def port(self):
+        return self._port
+
+    @port.setter
+    def port(self, val):
+        self._port = int(val)
+
+    @property
+    def user(self):
+        return self._user
+
+    @user.setter
+    def user(self, val):
+        self._user = val
+
+    @property
+    def password(self):
+        return self._password
+
+    @password.setter
+    def password(self, val):
+        self._password = val
+
     def set_audit_callback(self, cb):
         self._audit_cb = cb
 

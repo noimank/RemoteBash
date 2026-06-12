@@ -78,6 +78,14 @@ class ConnectionManager:
             s.enabled = bool(fields["enabled"])
         if "safe_rm" in fields:
             s.safe_rm = bool(fields["safe_rm"])
+        if "host" in fields:
+            s.host = fields["host"]
+        if "port" in fields:
+            s.port = fields["port"]
+        if "user" in fields:
+            s.user = fields["user"]
+        if "password" in fields:
+            s.password = fields["password"]
 
         allowed = {"host", "port", "user", "password", "enabled", "safe_rm"}
         updates = {k: v for k, v in fields.items() if k in allowed}
