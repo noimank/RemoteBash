@@ -65,14 +65,9 @@ async function loadClientFilter() {
 // 审计条目渲染
 // ---------------------------------------------------------------------------
 
-function timeAgo(iso) {
+function formatTime(iso) {
   const d = new Date(iso + "Z");
-  const now = new Date();
-  const diff = Math.floor((now - d) / 1000);
-  if (diff < 60) return diff + " 秒前";
-  if (diff < 3600) return Math.floor(diff / 60) + " 分钟前";
-  if (diff < 86400) return Math.floor(diff / 3600) + " 小时前";
-  return d.toLocaleDateString("zh-CN");
+  return d.toLocaleString("zh-CN");
 }
 
 function exitBadge(code) {
@@ -95,7 +90,7 @@ function openDetail(idx) {
   if (!entry) return;
   const m = document.getElementById("detailModal");
   document.getElementById("mdClient").textContent = entry.client_name;
-  document.getElementById("mdTime").textContent = timeAgo(entry.created_at) + " · " + new Date(entry.created_at + "Z").toLocaleString("zh-CN");
+  document.getElementById("mdTime").textContent = formatTime(entry.created_at);
   document.getElementById("mdExit").innerHTML = exitBadge(entry.exit_code);
   document.getElementById("mdCmd").textContent = entry.command || "(空)";
   document.getElementById("mdCwd").textContent = entry.cwd || "~";
@@ -135,7 +130,7 @@ function renderAudit(entries) {
       <div class="flex items-center gap-1.5 px-3 py-2">
         ${hasOut ? '<span class="w-1.5 h-1.5 rounded-full bg-green shrink-0" title="stdout: ' + formatSize(e.stdout.length) + '"></span>' : ''}
         ${hasErr ? '<span class="w-1.5 h-1.5 rounded-full bg-red shrink-0" title="stderr: ' + formatSize(e.stderr.length) + '"></span>' : ''}
-        <span class="text-[11px] text-muted w-[84px] shrink-0">${timeAgo(e.created_at)}</span>
+        <span class="text-[11px] text-muted w-[160px] shrink-0">${formatTime(e.created_at)}</span>
         <code class="text-accent text-[11px] font-mono w-[88px] shrink-0 truncate" title="${escapeHtml(e.client_name)}">${e.client_name}</code>
         <code class="text-xs text-gray-300 font-mono truncate flex-1 min-w-0" title="${escapeHtml(e.command)}">$ ${escapeHtml(e.command)}</code>
         <span class="text-[11px] text-muted w-[46px] text-right shrink-0">${e.duration_ms}ms</span>
