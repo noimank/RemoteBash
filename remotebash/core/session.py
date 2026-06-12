@@ -214,7 +214,7 @@ class RemoteSession:
         conn = await asyncssh.connect(
             self._host, port=self._port, username=self._user,
             password=self._password, client_keys=[], known_hosts=None,
-            connect_timeout=10,
+            connect_timeout=4,
         )
         conn.close()
         await conn.wait_closed()

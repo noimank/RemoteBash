@@ -97,7 +97,7 @@ async def test_client(client_name: str, request: Request):
         await s.test_connection()
     except asyncio.TimeoutError:
         return JSONResponse({
-            "error": f"连接超时 — 无法在 10 秒内连接到 {s.host}:{s.port}，请检查网络或防火墙",
+            "error": f"连接超时 — 无法在有效时间内连接到 {s.host}:{s.port}，请检查网络或防火墙",
             "host": s.host, "port": s.port,
         }, status_code=504)
     except asyncssh.PermissionDenied as exc:
