@@ -14,21 +14,18 @@ def register_tools(mcp):
     @mcp.tool
     async def RemoteShell(client_name: str, command: str, timeout: int = 30,
                           ctx: Context = CurrentContext()) -> dict:
-        """Execute a shell command on a remote host.
+        """Execute a command on a remote host via SSH.
 
-        The working directory persists between calls.  Use ``cd /path`` and
-        subsequent calls run from that directory.
+        Call ``ListRemoteClients`` first to get valid **client_name** values.
+        Do not guess names — use exactly what the list returns.
 
-        Idle-timed-out sessions are automatically reconnected — this is
-        transparent to the caller.
+        CWD is stateful across calls: ``cd /path`` persists.  To check the
+        current directory, run ``pwd``.
 
-        Args:
-            client_name: The client name (from ``ListRemoteClients``).
-            command:     Shell command to execute.
-            timeout:     Max execution time in seconds (default 30).
+        Increase **timeout** for long-running commands (build, install, large
+        transfer); the default kills at 30 s.
 
-        Returns:
-            ``{stdout, stderr, exit_code, cwd}``.
+        Returns ``{stdout, stderr, exit_code, cwd}``.
         """
         mgr = ctx.lifespan_context["manager"]
         try:
@@ -41,14 +38,21 @@ def register_tools(mcp):
 
     @mcp.tool
     def ListRemoteClients(ctx: Context = CurrentContext()) -> list[dict]:
-        """List all enabled remote hosts.
+        """List configured remote hosts.
 
-        Only enabled clients are listed.  Connection state is handled
-        transparently — any enabled client is ready to use (lazy connect).
+        Use the returned ``name`` as ``client_name`` for ``RemoteShell``.
+        Fields: ``name``, ``host``, ``port``, ``user``, ``cwd``, ``label``.
 
-        Returns a list with keys: ``name``, ``host``, ``port``, ``user``,
-        ``cwd``, ``label``.
+        Empty list means nothing is configured — one item with
+        ``_message`` guides the user to the web dashboard.
         """
         mgr = ctx.lifespan_context["manager"]
-        return [{k: c[k] for k in ("name", "host", "port", "user", "cwd", "label")}
-                for c in mgr.list_enabled()]
+        clients = [{k: c[k] for k in ("name", "host", "port", "user", "cwd", "label")}
+                    for c in mgr.list_enabled()]
+        if not clients:
+            return [{"_message": (
+                "No remote hosts configured yet.  Open the RemoteBash dashboard at "
+                "http://localhost:24587 to add your SSH hosts, then run "
+                "ListRemoteClients again."
+            )}]
+        return clients
