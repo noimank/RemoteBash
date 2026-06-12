@@ -180,6 +180,20 @@ goose configure
 | `DataTransfer` | SFTP 文件传输（上传/下载），支持通配符和自动展开 `~` |
 | `ListRemoteClients` | 列出所有已启用的 SSH 主机 |
 
+### 安全删除（safe_rm）
+
+RemoteBash 内置了 `safe_rm` 安全删除机制——开启后会 shadow 原生的 `rm` 命令，将删除操作改为 mv 至 `/tmp/.rbsh_trash/` 下按时间戳和 PID 分类的回收目录，而非直接删除文件。
+
+**特性：**
+- 每次 `rm` 调用创建独立回收目录（`<epoch>_<pid>`），方便按操作批次恢复
+- 支持标准 `rm` 选项（如 `-rf`、`-v` 等），选项会原样传递
+- mv 失败时（如跨设备）自动回退为真正的 `rm`，并输出提示，不会静默失败
+- 需要绕过 shim 时，使用 `command rm`、`/bin/rm` 或 `\rm` 即可调用原生 `rm`
+
+**按需开启：** 在仪表盘添加或编辑主机时勾选「安全删除」即可。`ListRemoteClients` 返回结果中也会包含 `safe_rm` 字段，AI 智能体可据此感知该主机是否启用了安全删除。
+
+> **注意**：`/tmp/.rbsh_trash/` 中的文件不会自动清理，请定期检查并手动删除不需要的回收文件。
+
 ## Web 仪表盘
 
 启动后访问 `http://localhost:24587`：
