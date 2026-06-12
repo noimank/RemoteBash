@@ -6,8 +6,11 @@ Usage:
 """
 
 import argparse
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+logger = logging.getLogger("remotebash")
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -54,6 +57,16 @@ async def _app_lifespan(app: FastAPI):
     _server_manager = ConnectionManager(db)
     await _server_manager.load()
     app.state.manager = _server_manager
+
+    # Print startup info to stderr for visibility alongside uvicorn logs
+    import sys
+    print(f"  📂 数据库：{app.state.db_path}", file=sys.stderr)
+    print(f"  🌐 仪表盘：http://localhost:{app.state.port}", file=sys.stderr)
+    print(f"  🔌 MCP 端点：http://localhost:{app.state.port}/mcp（传输：{app.state.transport}）", file=sys.stderr)
+    print(f"  🖥️  已加载 {len(_server_manager._sessions)} 个客户端", file=sys.stderr)
+    logger.info("RemoteBash 就绪 — 仪表盘 http://localhost:%d  MCP http://localhost:%d/mcp",
+                 app.state.port, app.state.port)
+
     try:
         yield
     finally:
@@ -70,6 +83,8 @@ def create_app(config: ServerConfig) -> FastAPI:
         lifespan=combine_lifespans(_app_lifespan, mcp_asgi.lifespan),
     )
     app.state.db_path = str(config.db_path)
+    app.state.port = config.port
+    app.state.transport = config.transport
 
     if _STATIC.is_dir():
         app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
@@ -102,6 +117,8 @@ def main() -> None:
     )
 
     import uvicorn
+    import sys
+    print(f"🚀 RemoteBash 启动中（传输：{config.transport}，端口：{config.port}）…", file=sys.stderr)
     uvicorn.run(create_app(config), host=config.host, port=config.port,
                 log_level="debug" if config.debug else "info")
 
