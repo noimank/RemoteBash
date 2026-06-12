@@ -16,6 +16,8 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastmcp import FastMCP
 from fastmcp.utilities.lifespan import combine_lifespans
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 
 from .api.audit_router import router as audit_router
 from .api.routes import router as api_router
@@ -75,6 +77,15 @@ async def _app_lifespan(app: FastAPI):
         _server_manager = None
 
 
+class _NoSlashRedirect(BaseHTTPMiddleware):
+    """将 /mcp 映射为 /mcp/，避免 Starlette Mount 产生 307 重定向。"""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/mcp":
+            request.scope["path"] = "/mcp/"
+        return await call_next(request)
+
+
 def create_app(config: ServerConfig) -> FastAPI:
     mcp_asgi = _mcp_asgi(config)
 
@@ -92,6 +103,7 @@ def create_app(config: ServerConfig) -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(api_router)
     app.include_router(audit_router)
+    app.add_middleware(_NoSlashRedirect)
     app.mount("/mcp", mcp_asgi)
     return app
 
