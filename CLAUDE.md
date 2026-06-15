@@ -34,13 +34,13 @@ FastAPI and FastMCP coexist on the same port via `fastmcp.utilities.lifespan.com
 
 ### CWD tracking (`remotebash/core/session.py`)
 
-Each command is wrapped in a shell snippet before execution:
+Each command is sent as an argv payload to a fixed remote runner:
 
 ```
-cd <quoted_cwd> 2>/dev/null && {command}; echo __RBSH__:<uuid>:EC:$?:CWD:$(pwd) >&2
+/bin/sh -c '<bootstrap: exec bash -c <runner> when available, else exec /bin/sh -c <runner>>'
 ```
 
-The anchor line (tagged with a per-call UUID) is appended to **stderr**. After the command runs, `exec()` finds the anchor, parses `exit_code` and the new `$PWD`, strips the anchor from stderr, and stores the new CWD for the next call. This is NOT a subshell — `cd` effects persist across calls. The public result (`stdout`, `stderr`, `exit_code`, `cwd`, `duration_ms`) is byte-for-byte what the remote command produced, plus metadata.
+The bootstrap is POSIX `sh`: it prefers `bash` when present and falls back to `/bin/sh` when the remote only has `sh`. The user command is passed as a quoted shell argument, not through stdin, so commands such as `kubectl exec` cannot consume RemoteBash bookkeeping. The runner changes to the tracked CWD, injects the optional `safe_rm` shim, runs the user command, and writes an anchor line tagged with a per-call UUID to **stderr** in the form `__RBSH__:<uuid>:EC:<status>:CWD:<pwd>`. An `EXIT` trap is kept as a fallback for commands which call `exit`. After the command runs, `exec()` finds the anchor, parses `exit_code` and the new `$PWD`, strips the anchor from stderr, and stores the new CWD for the next call.
 
 ### Connection lifecycle (`remotebash/core/session.py`, `remotebash/core/manager.py`)
 

@@ -245,7 +245,7 @@ DELETE /api/audit                清除审计日志（支持单条 / 按主机 /
 
 ### 工作目录追踪
 
-`cd` 的效果会跨命令保留——在下一条 `remote_shell` 命令中继续生效。实现方式是在每个命令前后插入轻量的 Shell 片段来追踪 `$PWD`，而非开启持久化 Shell 会话。
+`cd` 的效果会跨命令保留——在下一条 `remote_shell` 命令中继续生效。实现方式是先通过 `/bin/sh -c` 启动固定 runner：远端有 `bash` 时使用 `bash -c`，只有 `sh` 时回退到 `/bin/sh -c`。用户命令作为独立参数传入 runner，而不是通过 stdin 传入，避免 `kubectl exec`、`read` 等命令误读 RemoteBash 的内部脚本。runner 会切换到上次记录的目录，安装 `EXIT` trap，在命令结束时把退出码和 `$PWD` 写入内部 marker，再由 RemoteBash 解析并更新本地会话状态。
 
 ### 连接管理
 

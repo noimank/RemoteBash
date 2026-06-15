@@ -11,6 +11,7 @@ before the result is returned, so:
 * **exit_code** and **cwd** are parsed from the anchor line.
 """
 
+import asyncio
 import logging
 import re
 import shlex
@@ -42,24 +43,126 @@ _TOKEN = "__RBSH__"
 _SAFE_RM_SHIM = (
     "rm(){"
     " _t=\"/tmp/.rbsh_trash/$(date +%s)_$$\"&&mkdir -p \"$_t\" 2>/dev/null;"
-    " _o=\"\";_n=0;_e=false;"
+    " _o=\"\";_n=0;_e=false;_f=0;"
     " for _a;do"
     "  $_e && {"
     "   _n=1;mv \"$_a\" \"$_t/\" 2>/dev/null||"
-    "    { command rm $_o \"$_a\"&&echo \"rm: removed $_a (trash failed)\">&2;};"
+    "    { command rm $_o \"$_a\"&&echo \"rm: removed $_a (trash failed)\">&2;}||_f=1;"
     "   continue;"
     "  };"
     "  case \"$_a\" in"
     "   --) _e=true;;"
     "   -*) _o=\"$_o $_a\";;"
     "   *) _n=1;mv \"$_a\" \"$_t/\" 2>/dev/null||"
-    "       { command rm $_o \"$_a\"&&echo \"rm: removed $_a (trash failed)\">&2;};;"
+    "       { command rm $_o \"$_a\"&&echo \"rm: removed $_a (trash failed)\">&2;}||_f=1;"
     "  esac;"
     " done;"
     " [ \"$_n\" -eq 0 ]&&command rm $_o 2>/dev/null;"
-    ":;"
+    " return $_f;"
     "}; "
 )
+
+
+_RUNNER_SCRIPT = (
+    "__rbsh_token=$1;"
+    "__rbsh_cid=$2;"
+    '__rbsh_cwd_arg=$(printf "%b" "$3");'
+    "__rbsh_safe_rm=$4;"
+    '__rbsh_command=$(printf "%b" "$5");'
+    "__rbsh_done=0;"
+    "__rbsh_track_cwd=0;"
+    "__rbsh_emit(){"
+    " __rbsh_ec=$1;"
+    ' [ "$__rbsh_done" = 1 ]&&return;'
+    " __rbsh_done=1;"
+    ' if [ "$__rbsh_track_cwd" = 1 ];then __rbsh_cwd=$(pwd);else __rbsh_cwd=;fi;'
+    " printf '%s:%s:EC:%s:CWD:%s\\n'"
+    ' "$__rbsh_token" "$__rbsh_cid" "$__rbsh_ec" "$__rbsh_cwd" >&2;'
+    "};"
+    "trap '__rbsh_emit $?' EXIT;"
+    'if [ "$__rbsh_cwd_arg" = "~" ];then cd 2>/dev/null;else cd "$__rbsh_cwd_arg" 2>/dev/null;fi;'
+    "__rbsh_ec=$?;"
+    'if [ "$__rbsh_ec" -ne 0 ];then __rbsh_emit "$__rbsh_ec";exit "$__rbsh_ec";fi;'
+    "__rbsh_track_cwd=1;"
+    'if [ "$__rbsh_safe_rm" = 1 ];then '
+    f"{_SAFE_RM_SHIM}"
+    "fi;"
+    'eval "$__rbsh_command";'
+    "__rbsh_ec=$?;"
+    '__rbsh_emit "$__rbsh_ec";'
+    'exit "$__rbsh_ec"'
+)
+
+
+_BOOTSTRAP_SCRIPT = (
+    "__rbsh_bash=$(command -v bash 2>/dev/null); "
+    'if [ -n "$__rbsh_bash" ]; then '
+    'exec "$__rbsh_bash" -c "$1" rbsh "$2" "$3" "$4" "$5" "$6"; '
+    'else exec /bin/sh -c "$1" rbsh "$2" "$3" "$4" "$5" "$6"; fi'
+)
+
+
+def _build_remote_command(command, cwd, cid, safe_rm=False):
+    """Build the SSH exec command for one remote shell execution."""
+    if "\x00" in command or "\x00" in cwd:
+        raise ValueError("Remote commands and CWD paths cannot contain NUL bytes.")
+
+    encoded_cwd = _encode_shell_bytes(cwd)
+    encoded_command = _encode_shell_bytes(command)
+    args = [
+        "/bin/sh",
+        "-c",
+        _BOOTSTRAP_SCRIPT,
+        "rbsh",
+        _RUNNER_SCRIPT,
+        _TOKEN,
+        cid,
+        encoded_cwd,
+        "1" if safe_rm else "0",
+        encoded_command,
+    ]
+    return " ".join(shlex.quote(arg) for arg in args)
+
+
+def _encode_shell_bytes(value):
+    """Encode text as a single-line POSIX printf %b payload."""
+    return "".join(f"\\{byte:03o}" for byte in value.encode())
+
+
+def _parse_exec_output(name, cid, stdout, stderr, fallback_exit_code, cwd):
+    """Strip the metadata anchor from stderr and return execution metadata."""
+    exit_code = fallback_exit_code
+    new_cwd = cwd
+    anchor = f"{_TOKEN}:{cid}:EC:"
+    idx = stderr.rfind(anchor)
+
+    if idx < 0:
+        logger.warning("CWD tracking anchor not found for '%s' — "
+                       "cwd may be stale (command used exec, was killed, "
+                       "or replaced the EXIT trap before exiting)", name)
+        return stdout, stderr, exit_code, new_cwd
+
+    line_end = stderr.find("\n", idx)
+    if line_end < 0:
+        marker = stderr[idx:]
+        suffix = ""
+    else:
+        marker = stderr[idx:line_end]
+        suffix = stderr[line_end + 1:]
+
+    marker_body = marker[len(anchor):]
+    m = re.match(r'(-?\d+):CWD:(.*)\Z', marker_body)
+    if not m:
+        logger.warning("Malformed CWD tracking anchor for '%s'", name)
+        return stdout, stderr, exit_code, new_cwd
+
+    stderr = stderr[:idx] + suffix
+    exit_code = int(m.group(1))
+    marker_cwd = m.group(2)
+    if marker_cwd != "":
+        new_cwd = marker_cwd
+
+    return stdout, stderr, exit_code, new_cwd
 
 
 class RemoteSession:
@@ -136,7 +239,7 @@ class RemoteSession:
             self._conn = None
             try:
                 conn.close()
-                await conn.wait_closed()
+                await asyncio.wait_for(conn.wait_closed(), timeout=5)
             except Exception:
                 pass
 
@@ -229,18 +332,7 @@ class RemoteSession:
             await self.connect()
 
         cid = uuid.uuid4().hex
-        cd = self._cwd if self._cwd == "~" else shlex.quote(self._cwd)
-
-        # Shell wrapper (no subshell — CWD changes must persist).
-        # When safe_rm is enabled, a rm() function is injected that shadows
-        # rm(1) with a mv-to-/tmp fallback.  Use ``command rm``, ``/bin/rm``,
-        # or ``\rm`` to bypass the shim.
-        # stdout → byte-for-byte command output.  Metadata → final stderr line.
-        pre = _SAFE_RM_SHIM if self.safe_rm else ""
-        wrapped = (
-            f"{pre}cd {cd} 2>/dev/null && {command}; "
-            f"echo {_TOKEN}:{cid}:EC:$?:CWD:$(pwd) >&2"
-        )
+        wrapped = _build_remote_command(command, self._cwd, cid, self.safe_rm)
 
         t0 = time.monotonic()
         try:
@@ -254,24 +346,13 @@ class RemoteSession:
 
         stdout = result.stdout or ""
         stderr = result.stderr or ""
-        exit_code = -1
-
-        # Parse anchor from stderr — everything before it is real stderr.
-        anchor = f"{_TOKEN}:{cid}:EC:"
-        idx = (stderr or "").find(anchor)
-        if idx >= 0:
-            # Slice off anchor and everything after it from stderr.
-            tail = stderr[idx + len(anchor):]
-            stderr = stderr[:idx].rstrip("\n")
-            m = re.match(r'(-?\d+):CWD:(.*)', tail)
-            if m:
-                exit_code = int(m.group(1))
-                new_cwd = m.group(2).strip()
-                if new_cwd:
-                    self._cwd = new_cwd
+        fallback_exit_code = result.returncode if result.returncode is not None else -1
+        stdout, stderr, exit_code, self._cwd = _parse_exec_output(
+            self.name, cid, stdout, stderr, fallback_exit_code, self._cwd
+        )
 
         r = {
-            "stdout": stdout.rstrip("\n"),
+            "stdout": stdout,
             "stderr": stderr,
             "exit_code": exit_code,
             "cwd": self._cwd,
