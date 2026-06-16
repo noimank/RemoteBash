@@ -66,6 +66,7 @@ function renderClient(c) {
         ? '<span class="text-[10px] uppercase tracking-wider bg-green/10 text-green border border-green/30 rounded px-1.5 py-0.5 font-medium" title="rm → mv /tmp">安全删除</span>'
         : ''}
       <span class="ml-auto flex gap-2">
+        <button onclick="openTerminal('${js(c.name)}')" class="rounded-lg bg-accent/10 border border-accent/40 hover:bg-accent/20 text-accent text-xs px-3 py-1.5 transition-colors font-medium" title="打开浏览器终端">终端</button>
         <button onclick="testConnect('${c.name}')" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-2.5 py-1.5 transition-colors font-medium" title="测试连接">测试</button>
         <button onclick="editClient('${js(c.name)}','${js(c.host)}','${js(c.port)}','${js(c.user)}','')" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium" title="编辑连接信息">编辑</button>
         ${c.enabled

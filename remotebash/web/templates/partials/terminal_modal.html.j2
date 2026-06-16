@@ -1,0 +1,15 @@
+{# 浏览器终端弹窗 — 由 terminal.js 驱动 (xterm.js + WebSocket) #}
+<div id="termModal"
+     class="opacity-0 pointer-events-none fixed inset-0 z-40 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity duration-200">
+  <div class="bg-surface-raised border border-border rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col" style="height:80vh">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-border">
+      <span id="termTitle" class="text-sm font-semibold text-accent font-mono">终端</span>
+      <div class="flex items-center gap-3">
+        <span class="text-[11px] text-muted">Esc 关闭 · 会话保持</span>
+        <button onclick="closeTerminal()"
+                class="rounded-lg border border-border hover:border-red/40 hover:text-red text-muted text-xs px-2.5 py-1.5 transition-colors font-medium">&times;</button>
+      </div>
+    </div>
+    <div id="termMount" class="flex-1 bg-[#0f1117] p-2 overflow-hidden"></div>
+  </div>
+</div>

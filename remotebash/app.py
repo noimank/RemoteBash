@@ -22,6 +22,7 @@ from starlette.requests import Request
 from .api.audit_router import router as audit_router
 from .api.routes import router as api_router
 from .api.tools import register_tools
+from .api.ws import router as ws_router
 from .config import DEFAULT_DB, ServerConfig
 from .core.database import open_db
 from .core.manager import ConnectionManager
@@ -103,6 +104,7 @@ def create_app(config: ServerConfig) -> FastAPI:
     app.include_router(dashboard_router)
     app.include_router(api_router)
     app.include_router(audit_router)
+    app.include_router(ws_router)
     app.add_middleware(_NoSlashRedirect)
     app.mount("/mcp", mcp_asgi)
     return app
