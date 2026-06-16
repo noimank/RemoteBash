@@ -281,6 +281,31 @@ class PersistentShellRunTest(unittest.TestCase):
             loop.run_until_complete(go())
         loop.close()
 
+    def test_run_timeout_includes_partial_interactive_prompt(self):
+        async def go():
+            proc = _FakeProcess()
+            shell = await _make_started_shell(proc)
+            run_task = asyncio.ensure_future(shell.run("rm k8s.zip", timeout=0.3))
+            await asyncio.sleep(0.02)
+            token = _latest_done_token(proc)
+            proc.stdout.feed(
+                f"__RBSH_START__:{token}__\r\n".encode()
+                + b"rm: remove regular file 'k8s.zip'?"
+            )
+            try:
+                await run_task
+            finally:
+                await shell.close()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "rm: remove regular file 'k8s\\.zip'\\?",
+        ) as cm:
+            _run(go())
+        self.assertIn("remote_shell cannot answer interactive prompts", str(cm.exception))
+        self.assertIn("Output captured before timeout:", str(cm.exception))
+        self.assertNotIn("__RBSH_START__", str(cm.exception))
+
     def test_run_writes_command_to_stdin(self):
         async def go():
             proc = _FakeProcess()

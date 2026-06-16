@@ -380,15 +380,22 @@ class PersistentShell:
             # in _buf before the timeout so the caller can diagnose WHY the
             # command hung (password prompt, slow network, etc.) instead of
             # getting a completely opaque error.
-            partial = self._clean_output(bytes(self._buf), command) if self._buf else ""
+            partial = self._clean_partial_output(
+                bytes(self._buf), command, token) if self._buf else ""
 
             # Shell state is now ambiguous — tear it down.
             self._pending = None
             self._pending_pattern = None
             await self.close()
-            detail = f"Command timed out after {timeout}s — the remote shell was reset"
+            detail = (
+                f"Command timed out after {timeout}s.\n"
+                "remote_shell cannot answer interactive prompts. The command "
+                "may be waiting for input; retry with non-interactive flags or "
+                "include the required input in the command.\n"
+                "The remote shell session was reset."
+            )
             if partial:
-                detail += f"\nPartial output before timeout:\n{partial}"
+                detail += f"\nOutput captured before timeout:\n{partial}"
             raise RuntimeError(detail) from None
 
         return raw_output, exit_code, cwd, token
@@ -428,6 +435,21 @@ class PersistentShell:
             + rb"(-?\d+):CWD:(.*?)__ ?\r?\n",
             re.DOTALL,
         )
+
+    @classmethod
+    def _clean_partial_output(cls, raw: bytes, command: str, token: str) -> str:
+        """Clean output captured before a command timed out.
+
+        During a normal run, the done-frame regex returns only bytes between
+        the private start and done frames. On timeout, ``_buf`` still contains
+        the start frame, so remove it before applying the normal text cleanup.
+        """
+        start = f"{_START_PREFIX}:{token}__".encode()
+        idx = raw.find(start)
+        if idx >= 0:
+            line_end = raw.find(b"\n", idx)
+            raw = raw[(line_end + 1) if line_end >= 0 else idx + len(start):]
+        return cls._clean_output(raw, command, token=token)
 
     @staticmethod
     def _clean_output(raw: bytes, command: str, token: str | None = None) -> str:
