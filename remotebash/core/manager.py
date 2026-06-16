@@ -10,6 +10,10 @@ class ConnectionManager:
     def __init__(self, db: aiosqlite.Connection):
         self.db = db
         self._sessions: dict[str, RemoteSession] = {}
+        # Browser-terminal shells — separate from the MCP exec shells so the
+        # two consumption modes don't corrupt each other's PTY framing.
+        # Keyed by client name; one terminal per client.
+        self._terminals: dict[str, object] = {}
 
     # ── Lifecycle ─────────────────────────────────────────────────
 
@@ -26,6 +30,12 @@ class ConnectionManager:
             self._sessions[name] = s
 
     async def close(self):
+        for shell in list(self._terminals.values()):
+            try:
+                await shell.close()
+            except Exception:
+                pass
+        self._terminals.clear()
         for s in self._sessions.values():
             await s.disconnect()
         self._sessions.clear()
@@ -61,11 +71,12 @@ class ConnectionManager:
                           password=password, enabled=enabled, safe_rm=safe_rm)
         s.set_audit_callback(self._on_audit)
         self._sessions[name] = s
-        return self._to_dict(name)
+        return self._sessions[name].to_dict()
 
     async def remove(self, name):
         if name not in self._sessions:
             raise KeyError(f"客户端 '{name}' 不存在。")
+        await self.close_terminal(name)
         await self._sessions.pop(name).disconnect()
         await self.db.execute("DELETE FROM clients WHERE name=?", (name,))
         await self.db.commit()
@@ -73,6 +84,20 @@ class ConnectionManager:
     async def update(self, name, **fields):
         if name not in self._sessions:
             raise KeyError(f"客户端 '{name}' 不存在。")
+
+        # Persist to DB first — on failure the in-memory state is unchanged.
+        allowed = {"host", "port", "user", "password", "enabled", "safe_rm"}
+        updates = {k: v for k, v in fields.items() if k in allowed}
+        if updates:
+            updates["name"] = name
+            cols = ", ".join(f"{k}=:{k}" for k in updates)
+            await self.db.execute(
+                f"UPDATE clients SET {cols}, updated_at=datetime('now') WHERE name=:name",
+                updates,
+            )
+            await self.db.commit()
+
+        # DB write succeeded — now safe to update in-memory state.
         s = self._sessions[name]
         if "enabled" in fields:
             s.enabled = bool(fields["enabled"])
@@ -87,17 +112,7 @@ class ConnectionManager:
         if "password" in fields:
             s.password = fields["password"]
 
-        allowed = {"host", "port", "user", "password", "enabled", "safe_rm"}
-        updates = {k: v for k, v in fields.items() if k in allowed}
-        if updates:
-            updates["name"] = name
-            cols = ", ".join(f"{k}=:{k}" for k in updates)
-            await self.db.execute(
-                f"UPDATE clients SET {cols}, updated_at=datetime('now') WHERE name=:name",
-                updates,
-            )
-            await self.db.commit()
-        return self._to_dict(name)
+        return self._sessions[name].to_dict()
 
     def get(self, name):
         if name not in self._sessions:
@@ -109,13 +124,68 @@ class ConnectionManager:
             raise KeyError(f"客户端 '{name}' 不存在。{hint}")
         return self._sessions[name]
 
+    # ── Browser terminals ──────────────────────────────────────────
+
+    async def get_or_create_terminal(self, name):
+        """Return a live PersistentShell for the browser terminal.
+
+        Each client gets at most one terminal shell, reused across WebSocket
+        reconnects (so closing the terminal tab doesn't lose shell state).
+        If the shell died it is transparently restarted.
+        """
+        session = self.get(name)
+        shell = self._terminals.get(name)
+
+        if shell is not None and not shell.alive:
+            try:
+                await shell.close()
+            except Exception:
+                pass
+            shell = None
+
+        if shell is None:
+            shell = await session.open_terminal_shell()
+            self._terminals[name] = shell
+
+        return shell
+
+    async def close_terminal(self, name):
+        """Tear down the browser-terminal shell for a client, if any."""
+        shell = self._terminals.pop(name, None)
+        if shell is not None:
+            try:
+                await shell.close()
+            except Exception:
+                pass
+
     def list_all(self):
-        return [self._to_dict(n) for n in self._sessions]
+        return [self._sessions[n].to_dict() for n in self._sessions]
 
     def list_enabled(self):
-        return [self._to_dict(n) for n, s in self._sessions.items() if s.enabled]
+        return [self._sessions[n].to_dict() for n, s in self._sessions.items() if s.enabled]
 
     # ── Audit queries ─────────────────────────────────────────────
+
+    @staticmethod
+    def _build_audit_where(client_name=None, after=None, before=None):
+        """Build WHERE clause fragments and params for audit queries.
+
+        Returns ``(clauses: list[str], params: list)``.
+        """
+        where = []
+        params = []
+        if client_name:
+            where.append("client_name=?")
+            params.append(client_name)
+        after = ConnectionManager._iso_to_sqlite(after)
+        before = ConnectionManager._iso_to_sqlite(before)
+        if after:
+            where.append("created_at>=?")
+            params.append(after)
+        if before:
+            where.append("created_at<?")
+            params.append(before)
+        return where, params
 
     @staticmethod
     def _iso_to_sqlite(iso: str | None) -> str | None:
@@ -125,26 +195,14 @@ class ConnectionManager:
         """
         if not iso:
             return None
-        # Strip trailing timezone / fractional seconds, replace T with space.
         s = iso.strip()
         if "T" in s:
-            s = s.split("T")[0] + " " + s.split("T")[1][:8]
+            parts = s.split("T")
+            s = parts[0] + " " + parts[1][:8]
         return s
 
     async def audit_list(self, client_name=None, after=None, before=None, limit=200, offset=0):
-        where = []
-        params = []
-        if client_name:
-            where.append("client_name=?")
-            params.append(client_name)
-        after = self._iso_to_sqlite(after)
-        before = self._iso_to_sqlite(before)
-        if after:
-            where.append("created_at>=?")
-            params.append(after)
-        if before:
-            where.append("created_at<?")
-            params.append(before)
+        where, params = self._build_audit_where(client_name, after, before)
         sql = "SELECT * FROM audit_log"
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -154,19 +212,7 @@ class ConnectionManager:
         return [dict(r) for r in await cur.fetchall()]
 
     async def audit_count(self, client_name=None, after=None, before=None):
-        where = []
-        params = []
-        if client_name:
-            where.append("client_name=?")
-            params.append(client_name)
-        after = self._iso_to_sqlite(after)
-        before = self._iso_to_sqlite(before)
-        if after:
-            where.append("created_at>=?")
-            params.append(after)
-        if before:
-            where.append("created_at<?")
-            params.append(before)
+        where, params = self._build_audit_where(client_name, after, before)
         sql = "SELECT COUNT(*) AS cnt FROM audit_log"
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -190,6 +236,3 @@ class ConnectionManager:
         return cur.rowcount
 
     # ── Internal ──────────────────────────────────────────────────
-
-    def _to_dict(self, name):
-        return self._sessions[name].to_dict()

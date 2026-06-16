@@ -1,33 +1,39 @@
-"""RemoteSession — SSH connection with CWD tracking and idle timeout.
+"""RemoteSession — SSH connection with a persistent interactive shell.
+
+Execution model
+---------------
+Commands run on a **single long-lived interactive shell with a PTY**, not a
+fresh ``/bin/bash -c`` per call.  This makes the experience identical to a real
+terminal session: ``cd``, ``export``, shell functions, aliases, ``umask`` and
+history all persist across commands, and programs see a real terminal (so
+``ls`` colouring, ``isatty()`` checks and interactive prompts behave normally).
+
+The machinery lives in :class:`remotebash.core.persistent_shell.PersistentShell`:
+it allocates a PTY, runs commands in a long-lived bash process, and appends a
+private completion sentinel after each MCP command to capture output + exit
+code + new CWD. ANSI colour codes are stripped so the MCP caller gets clean
+text.
 
 Output preservation
 -------------------
-Metadata (exit code, new CWD) is embedded in a single **stderr** anchor
-line tagged with a per-call UUID.  This line is stripped from stderr
-before the result is returned, so:
-
-* **stdout** is byte-for-byte the remote command's stdout.
-* **stderr** is byte-for-byte the remote command's stderr.
-* **exit_code** and **cwd** are parsed from the anchor line.
+* **stdout** is the command's stdout, ANSI-stripped and decoded.
+* **stderr** is empty — a PTY merges stdout/stderr into one stream, so all
+  output lands in ``stdout``.
+* **exit_code** and **cwd** come from the completion sentinel (exact, even for
+  builtins like ``cd``).
 """
 
 import asyncio
 import logging
-import re
-import shlex
 import time
-import uuid
 
 import asyncssh
 
+from .persistent_shell import PersistentShell, _TERMINAL_PS1
+
 logger = logging.getLogger(__name__)
 
-IDLE_TIMEOUT = 3600
-
-# Unique token that is vanishingly unlikely to collide with real stderr
-_TOKEN = "__RBSH__"
-
-# POSIX-sh function that shadows rm(1) with a trash-to-/tmp safe delete.
+# Bash function that shadows rm(1) with a trash-to-/tmp safe delete.
 #
 # Each invocation creates its own subdirectory under /tmp/.rbsh_trash/
 # named <epoch>_<pid> so deletions are grouped and timestamped.
@@ -63,108 +69,6 @@ _SAFE_RM_SHIM = (
 )
 
 
-_RUNNER_SCRIPT = (
-    "__rbsh_token=$1;"
-    "__rbsh_cid=$2;"
-    '__rbsh_cwd_arg=$(printf "%b" "$3");'
-    "__rbsh_safe_rm=$4;"
-    '__rbsh_command=$(printf "%b" "$5");'
-    "__rbsh_done=0;"
-    "__rbsh_track_cwd=0;"
-    "__rbsh_emit(){"
-    " __rbsh_ec=$1;"
-    ' [ "$__rbsh_done" = 1 ]&&return;'
-    " __rbsh_done=1;"
-    ' if [ "$__rbsh_track_cwd" = 1 ];then __rbsh_cwd=$(pwd);else __rbsh_cwd=;fi;'
-    " printf '%s:%s:EC:%s:CWD:%s\\n'"
-    ' "$__rbsh_token" "$__rbsh_cid" "$__rbsh_ec" "$__rbsh_cwd" >&2;'
-    "};"
-    "trap '__rbsh_emit $?' EXIT;"
-    'if [ "$__rbsh_cwd_arg" = "~" ];then cd 2>/dev/null;else cd "$__rbsh_cwd_arg" 2>/dev/null;fi;'
-    "__rbsh_ec=$?;"
-    'if [ "$__rbsh_ec" -ne 0 ];then __rbsh_emit "$__rbsh_ec";exit "$__rbsh_ec";fi;'
-    "__rbsh_track_cwd=1;"
-    'if [ "$__rbsh_safe_rm" = 1 ];then '
-    f"{_SAFE_RM_SHIM}"
-    "fi;"
-    'eval "$__rbsh_command";'
-    "__rbsh_ec=$?;"
-    '__rbsh_emit "$__rbsh_ec";'
-    'exit "$__rbsh_ec"'
-)
-
-
-_BOOTSTRAP_SCRIPT = (
-    "__rbsh_bash=$(command -v bash 2>/dev/null); "
-    'if [ -n "$__rbsh_bash" ]; then '
-    'exec "$__rbsh_bash" -c "$1" rbsh "$2" "$3" "$4" "$5" "$6"; '
-    'else exec /bin/sh -c "$1" rbsh "$2" "$3" "$4" "$5" "$6"; fi'
-)
-
-
-def _build_remote_command(command, cwd, cid, safe_rm=False):
-    """Build the SSH exec command for one remote shell execution."""
-    if "\x00" in command or "\x00" in cwd:
-        raise ValueError("Remote commands and CWD paths cannot contain NUL bytes.")
-
-    encoded_cwd = _encode_shell_bytes(cwd)
-    encoded_command = _encode_shell_bytes(command)
-    args = [
-        "/bin/sh",
-        "-c",
-        _BOOTSTRAP_SCRIPT,
-        "rbsh",
-        _RUNNER_SCRIPT,
-        _TOKEN,
-        cid,
-        encoded_cwd,
-        "1" if safe_rm else "0",
-        encoded_command,
-    ]
-    return " ".join(shlex.quote(arg) for arg in args)
-
-
-def _encode_shell_bytes(value):
-    """Encode text as a single-line POSIX printf %b payload."""
-    return "".join(f"\\{byte:03o}" for byte in value.encode())
-
-
-def _parse_exec_output(name, cid, stdout, stderr, fallback_exit_code, cwd):
-    """Strip the metadata anchor from stderr and return execution metadata."""
-    exit_code = fallback_exit_code
-    new_cwd = cwd
-    anchor = f"{_TOKEN}:{cid}:EC:"
-    idx = stderr.rfind(anchor)
-
-    if idx < 0:
-        logger.warning("CWD tracking anchor not found for '%s' — "
-                       "cwd may be stale (command used exec, was killed, "
-                       "or replaced the EXIT trap before exiting)", name)
-        return stdout, stderr, exit_code, new_cwd
-
-    line_end = stderr.find("\n", idx)
-    if line_end < 0:
-        marker = stderr[idx:]
-        suffix = ""
-    else:
-        marker = stderr[idx:line_end]
-        suffix = stderr[line_end + 1:]
-
-    marker_body = marker[len(anchor):]
-    m = re.match(r'(-?\d+):CWD:(.*)\Z', marker_body)
-    if not m:
-        logger.warning("Malformed CWD tracking anchor for '%s'", name)
-        return stdout, stderr, exit_code, new_cwd
-
-    stderr = stderr[:idx] + suffix
-    exit_code = int(m.group(1))
-    marker_cwd = m.group(2)
-    if marker_cwd != "":
-        new_cwd = marker_cwd
-
-    return stdout, stderr, exit_code, new_cwd
-
-
 class RemoteSession:
 
     def __init__(self, name, host, port, user, password, enabled=True, safe_rm=False):
@@ -177,9 +81,10 @@ class RemoteSession:
         self.safe_rm = safe_rm
 
         self._conn = None
+        self._shell = None              # PersistentShell — lazily started
+        self._shell_lock = asyncio.Lock()  # guards _ensure_shell() against races
         self._cwd = "~"
         self._audit_cb = None
-        self._last_activity = 0.0
 
     @property
     def connected(self):
@@ -231,9 +136,14 @@ class RemoteSession:
             keepalive_interval=30, keepalive_count_max=3,
         )
         self._cwd = "~"
-        self._last_activity = time.monotonic()
 
     async def disconnect(self):
+        if self._shell is not None:
+            try:
+                await self._shell.close()
+            except Exception:
+                pass
+            self._shell = None
         if self._conn:
             conn = self._conn
             self._conn = None
@@ -271,10 +181,8 @@ class RemoteSession:
         if not self.enabled:
             raise RuntimeError(f"Client '{self.name}' is disabled.")
 
-        if self.connected and (time.monotonic() - self._last_activity) > IDLE_TIMEOUT:
-            await self.disconnect()
-        if not self.connected:
-            await self.connect()
+        # transfer uses the raw SFTP channel, not the interactive shell.
+        await self.connect()
 
         # Resolve ~ in the remote-side path (SFTP doesn't expand it).
         if direction == "remote2local":
@@ -294,14 +202,20 @@ class RemoteSession:
                         f"Invalid direction '{direction}'. "
                         "Expected 'remote2local' or 'local2remote'."
                     )
-                stat = await sftp.stat(dst if direction == "local2remote" else src)
-                size = stat.size
+                # Best-effort: stat the remote file for size reporting.
+                # The transfer itself succeeded regardless of whether stat
+                # works (permissions, race with deletion, etc.).
+                size = 0
+                try:
+                    st = await sftp.stat(dst if direction == "local2remote" else src)
+                    size = st.size
+                except (asyncssh.Error, OSError):
+                    pass
         except (asyncssh.Error, OSError, TimeoutError) as exc:
             await self.disconnect()
             raise RuntimeError(f"SFTP transfer failed: {exc}") from exc
 
-        self._last_activity = time.monotonic()
-        elapsed = int((self._last_activity - t0) * 1000)
+        elapsed = int((time.monotonic() - t0) * 1000)
         logger.info("Transfer %s -> %s (%s) done in %d ms, %d bytes",
                     src, dst, direction, elapsed, size)
         return {
@@ -322,45 +236,92 @@ class RemoteSession:
         conn.close()
         await conn.wait_closed()
 
+    async def _ensure_shell(self) -> PersistentShell:
+        """Return a live PersistentShell, (re)starting it if needed.
+
+        The shell is started lazily on first use and rebuilt if the
+        underlying process died.
+        ``safe_rm`` is honoured at shell-start time: the shim is injected
+        into the persistent shell, so it shadows ``rm`` for every command.
+
+        An ``asyncio.Lock`` serialises concurrent callers so two
+        simultaneous ``exec()`` invocations cannot create duplicate shells.
+
+        When ``safe_rm`` was toggled via the dashboard while the shell is
+        alive, the existing shell is torn down and re-created so the
+        setting takes effect immediately.
+        """
+        await self.connect()
+        async with self._shell_lock:
+            # Rebuild if the shell died, or if safe_rm was toggled while
+            # the shell was running (the shim is baked-in at start time,
+            # so a live shell can't pick up the change on the fly).
+            if self._shell is not None and self._shell.alive and self._shell._safe_rm == self.safe_rm:
+                return self._shell
+            if self._shell is not None:
+                try:
+                    await self._shell.close()
+                except Exception:
+                    pass
+                self._shell = None
+            self._shell = await PersistentShell(
+                self._conn, safe_rm=self.safe_rm,
+                init_script=_SAFE_RM_SHIM if self.safe_rm else "",
+            ).start()
+            self._cwd = "~"
+            return self._shell
+
     async def exec(self, command, timeout=30):
+        """Run ``command`` on the persistent interactive shell.
+
+        Returns ``{stdout, stderr, exit_code, cwd, duration_ms}``.  Because
+        the shell is a PTY, stdout and stderr are merged into ``stdout`` and
+        ``stderr`` is always ``""``.
+        """
         if not self.enabled:
             raise RuntimeError(f"Client '{self.name}' is disabled.")
 
-        if self.connected and (time.monotonic() - self._last_activity) > IDLE_TIMEOUT:
+        try:
+            shell = await self._ensure_shell()
+        except (asyncssh.Error, OSError, RuntimeError) as exc:
             await self.disconnect()
-        if not self.connected:
-            await self.connect()
-
-        cid = uuid.uuid4().hex
-        wrapped = _build_remote_command(command, self._cwd, cid, self.safe_rm)
+            raise RuntimeError(f"SSH shell setup failed: {exc}") from exc
 
         t0 = time.monotonic()
         try:
-            result = await self._conn.run(wrapped, timeout=timeout)
-        except (asyncssh.Error, OSError, TimeoutError) as exc:
+            r = await shell.run(command, timeout=timeout)
+        except (asyncssh.Error, OSError) as exc:
             await self.disconnect()
             raise RuntimeError(f"SSH command failed: {exc}") from exc
 
-        self._last_activity = time.monotonic()
-        elapsed = int((self._last_activity - t0) * 1000)
-
-        stdout = result.stdout or ""
-        stderr = result.stderr or ""
-        fallback_exit_code = result.returncode if result.returncode is not None else -1
-        stdout, stderr, exit_code, self._cwd = _parse_exec_output(
-            self.name, cid, stdout, stderr, fallback_exit_code, self._cwd
-        )
-
-        r = {
-            "stdout": stdout,
-            "stderr": stderr,
-            "exit_code": exit_code,
-            "cwd": self._cwd,
-            "duration_ms": elapsed,
-        }
+        self._cwd = r.get("cwd", self._cwd)
         if self._audit_cb:
             await self._audit_cb(self.name, command, r)
         return r
+
+    async def open_terminal_shell(self) -> PersistentShell:
+        """Open a **separate** PersistentShell for the browser terminal.
+
+        This is independent of the MCP ``exec`` shell (``self._shell``): the
+        browser terminal is free-form interaction, while exec() is strict
+        one-command-per-call framing.  Sharing one PTY between both would
+        corrupt the framing, so each consumption mode owns its own shell.
+        Both reuse the same underlying SSH connection.
+
+        The terminal shell uses a human-readable PS1. The MCP shell leaves the
+        user's prompt alone and frames command completion with a private
+        sentinel appended to each command.
+        """
+        if not self.enabled:
+            raise RuntimeError(f"Client '{self.name}' is disabled.")
+        await self.connect()
+        # Terminal shells are managed by the caller (ConnectionManager); we
+        # only construct + start one here on the shared connection.
+        return await PersistentShell(
+            self._conn, safe_rm=self.safe_rm,
+            init_script=_SAFE_RM_SHIM if self.safe_rm else "",
+            prompt_template=_TERMINAL_PS1,
+        ).start()
 
     def to_dict(self):
         return {
