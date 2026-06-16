@@ -34,6 +34,7 @@ import asyncio
 import logging
 import re
 import time
+import unicodedata
 import uuid
 
 import asyncssh
@@ -455,7 +456,9 @@ class PersistentShell:
     def _clean_output(raw: bytes, command: str, token: str | None = None) -> str:
         """Normalise command output for the MCP/text path.
 
-        1. ``\\r\\n`` / ``\\r`` → ``\\n``  (PTY cooked mode uses CRLF).
+        1. Render carriage returns like a terminal: ``\\r+\\n`` is one
+           newline, while standalone ``\\r`` returns to column 0 and lets
+           following bytes overwrite the current line.
         2. Drop the leading PTY echo of the command itself, **only** when the
            shell is in a transient state where echo might leak through
            (e.g. before ``stty -echo`` has fully taken effect).  We detect
@@ -467,22 +470,171 @@ class PersistentShell:
         3. Strip ANSI colour/escape sequences.
         4. Decode to ``str`` without trimming command output.
         """
-        text = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-        cmd_bytes = command.encode()
-        lines = text.split(b"\n")
+        text = PersistentShell._render_terminal_text(raw)
+        lines = text.split("\n")
 
         # Only strip echoed input when PTY echo is actually present.
         while lines:
             first = lines[0].strip()
-            if first == cmd_bytes.strip():
+            if first == command.strip():
                 lines = lines[1:]
                 continue
-            if token is not None and token.encode() in first and first.startswith(b"__rbsh_cmd="):
+            if token is not None and token in first and first.startswith("__rbsh_cmd="):
                 lines = lines[1:]
                 continue
             break
-        stripped = strip_ansi(b"\n".join(lines))
-        return stripped.decode("utf-8", "replace")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _render_terminal_text(raw: bytes) -> str:
+        """Approximate terminal rendering for the MCP text path.
+
+        PTYs often produce CRLF, and CRLF file content can become CRCRLF.
+        A terminal treats those as a single visual newline. Standalone CR is
+        carriage return: it moves the cursor to column 0 without advancing the
+        row, so later text overwrites the existing line. ANSI escape sequences
+        do not occupy cells; basic erase/cursor controls are applied so common
+        progress bars and coloured output reduce to readable final text.
+        """
+        text = raw.decode("utf-8", "replace")
+        lines = [[]]
+        row = 0
+        col = 0
+        i = 0
+        while i < len(text):
+            ch = text[i]
+
+            if ch == "\x1b":
+                i, row, col = PersistentShell._apply_escape_sequence(
+                    text, i, lines, row, col)
+                continue
+
+            if ch == "\r":
+                j = i
+                while j < len(text) and text[j] == "\r":
+                    j += 1
+                if j < len(text) and text[j] == "\n":
+                    lines.append([])
+                    row += 1
+                    col = 0
+                    i = j + 1
+                else:
+                    col = 0
+                    i = j
+                continue
+            if ch == "\n":
+                lines.append([])
+                row += 1
+                col = 0
+                i += 1
+                continue
+            if ch == "\b":
+                col = max(0, col - 1)
+                i += 1
+                continue
+            if ch == "\t":
+                next_tab = ((col // 8) + 1) * 8
+                line = lines[row]
+                while len(line) < next_tab:
+                    line.append(" ")
+                col = next_tab
+                i += 1
+                continue
+            if unicodedata.category(ch)[0] == "C":
+                i += 1
+                continue
+
+            col = PersistentShell._put_terminal_char(lines[row], col, ch)
+            i += 1
+
+        return "\n".join(PersistentShell._cells_to_text(line) for line in lines)
+
+    @staticmethod
+    def _put_terminal_char(line: list[str], col: int, ch: str) -> int:
+        if unicodedata.combining(ch):
+            for idx in range(min(col, len(line)) - 1, -1, -1):
+                if line[idx]:
+                    line[idx] += ch
+                    break
+            return col
+
+        width = 2 if unicodedata.east_asian_width(ch) in {"F", "W"} else 1
+        while len(line) < col:
+            line.append(" ")
+        for offset in range(width):
+            idx = col + offset
+            if idx < len(line):
+                line[idx] = ch if offset == 0 else ""
+            else:
+                line.append(ch if offset == 0 else "")
+        return col + width
+
+    @staticmethod
+    def _cells_to_text(line: list[str]) -> str:
+        return "".join(cell for cell in line if cell)
+
+    @staticmethod
+    def _apply_escape_sequence(text: str, start: int, lines: list[list[str]],
+                               row: int, col: int) -> tuple[int, int, int]:
+        if start + 1 >= len(text):
+            return start + 1, row, col
+
+        introducer = text[start + 1]
+        if introducer == "]":  # OSC, e.g. title/hyperlink
+            end_bel = text.find("\x07", start + 2)
+            end_st = text.find("\x1b\\", start + 2)
+            ends = [pos for pos in (end_bel, end_st) if pos >= 0]
+            if not ends:
+                return len(text), row, col
+            end = min(ends)
+            return end + (2 if end == end_st else 1), row, col
+
+        if introducer != "[":
+            return start + 2, row, col
+
+        end = start + 2
+        while end < len(text) and not ("@" <= text[end] <= "~"):
+            end += 1
+        if end >= len(text):
+            return len(text), row, col
+
+        params = text[start + 2:end]
+        final = text[end]
+        values = PersistentShell._parse_csi_params(params)
+        line = lines[row]
+
+        if final == "K":
+            mode = values[0] if values else 0
+            if mode == 0:
+                del line[col:]
+            elif mode == 1:
+                for idx in range(min(col + 1, len(line))):
+                    line[idx] = " "
+            elif mode == 2:
+                line.clear()
+                col = 0
+        elif final == "G":
+            col = max(0, (values[0] if values else 1) - 1)
+        elif final == "C":
+            col += values[0] if values else 1
+        elif final == "D":
+            col = max(0, col - (values[0] if values else 1))
+        # Colour/style and unsupported cursor/screen operations are ignored.
+
+        return end + 1, row, col
+
+    @staticmethod
+    def _parse_csi_params(params: str) -> list[int]:
+        values = []
+        for part in params.lstrip("?").split(";"):
+            if not part:
+                values.append(0)
+                continue
+            try:
+                values.append(int(part))
+            except ValueError:
+                values.append(0)
+        return values
 
     # ── raw passthrough (browser terminal path) ───────────────────
 

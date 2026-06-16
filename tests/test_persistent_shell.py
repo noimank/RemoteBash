@@ -236,6 +236,82 @@ class PersistentShellRunTest(unittest.TestCase):
         r = _run(go())
         self.assertEqual(r["output"], "green\n")
 
+    def test_run_collapses_pty_crcrlf_to_single_newline(self):
+        async def go():
+            proc = _FakeProcess()
+            shell = await _make_started_shell(proc)
+            run_task = asyncio.ensure_future(shell.run("cat file.txt"))
+            await asyncio.sleep(0.02)
+            _feed_done(proc, 0, "/root", output=b"line1\r\r\nline2\r\r\n")
+            return await run_task
+        r = _run(go())
+        self.assertEqual(r["output"], "line1\nline2\n")
+
+    def test_run_renders_standalone_cr_as_line_overwrite(self):
+        async def go():
+            proc = _FakeProcess()
+            shell = await _make_started_shell(proc)
+            run_task = asyncio.ensure_future(shell.run("progress"))
+            await asyncio.sleep(0.02)
+            _feed_done(
+                proc,
+                0,
+                "/root",
+                output=b"progress 10%\rprogress 20%\rprogress 100%\n",
+            )
+            return await run_task
+        r = _run(go())
+        self.assertEqual(r["output"], "progress 100%\n")
+
+    def test_run_renders_cr_over_colored_text_without_ansi_debris(self):
+        async def go():
+            proc = _FakeProcess()
+            shell = await _make_started_shell(proc)
+            run_task = asyncio.ensure_future(shell.run("progress"))
+            await asyncio.sleep(0.02)
+            _feed_done(
+                proc,
+                0,
+                "/root",
+                output=b"\x1b[32mabc\x1b[0m\rxyz\n",
+            )
+            return await run_task
+        r = _run(go())
+        self.assertEqual(r["output"], "xyz\n")
+
+    def test_run_renders_utf8_cr_without_splitting_bytes(self):
+        async def go():
+            proc = _FakeProcess()
+            shell = await _make_started_shell(proc)
+            run_task = asyncio.ensure_future(shell.run("progress"))
+            await asyncio.sleep(0.02)
+            _feed_done(proc, 0, "/root", output="你好\rA\n".encode())
+            return await run_task
+        r = _run(go())
+        self.assertEqual(r["output"], "A好\n")
+
+    def test_run_renders_backspace_edits(self):
+        async def go():
+            proc = _FakeProcess()
+            shell = await _make_started_shell(proc)
+            run_task = asyncio.ensure_future(shell.run("edit"))
+            await asyncio.sleep(0.02)
+            _feed_done(proc, 0, "/root", output=b"a\b \bb\n")
+            return await run_task
+        r = _run(go())
+        self.assertEqual(r["output"], "b\n")
+
+    def test_run_renders_ansi_erase_line(self):
+        async def go():
+            proc = _FakeProcess()
+            shell = await _make_started_shell(proc)
+            run_task = asyncio.ensure_future(shell.run("clear-line"))
+            await asyncio.sleep(0.02)
+            _feed_done(proc, 0, "/root", output=b"abcdef\r\x1b[Kxy\n")
+            return await run_task
+        r = _run(go())
+        self.assertEqual(r["output"], "xy\n")
+
     def test_run_reports_nonzero_exit_code(self):
         async def go():
             proc = _FakeProcess()
