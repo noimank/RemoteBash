@@ -13,18 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class RemoteShellOutput(TypedDict):
-    """Result of a remote shell command execution."""
+    """Remote command result."""
 
-    stdout: str
-    stderr: str
+    output: str
     exit_code: int
     cwd: str
 
 
 class RemoteClientInfo(TypedDict):
-    """SSH host configuration."""
+    """Enabled SSH host."""
 
-    name: str
+    client_name: str
     host: str
     port: int
     user: str
@@ -55,26 +54,32 @@ def register_tools(mcp):
     )
     async def remote_shell(
         client_name: Annotated[
-            str, Field(description="Name of the remote host. Call list_remote_clients first — do not guess.")
+            str, Field(description="Remote host name from list_remote_clients.")
         ],
         command: Annotated[
-            str, Field(description="Shell command to execute on the remote host. Pipes, redirects, and shell builtins all work.")
+            str, Field(
+                description=(
+                    "Bash command to execute on the remote host. Pipes, redirects, "
+                    "builtins, aliases, and functions work."
+                )
+            )
         ],
         timeout: Annotated[
-            int, Field(description="Command timeout in seconds (default: 30). Increase for builds, installs, or large transfers.")
+            int, Field(
+                description=(
+                    "Timeout in seconds. Increase for long-running builds, installs, "
+                    "or diagnostics."
+                )
+            )
         ] = 30,
         ctx: Context = CurrentContext(),
     ) -> RemoteShellOutput:
-        """Execute a command on a remote host via SSH.
+        """Run a bash command on a remote host.
 
-        The working directory (CWD) is stateful across calls: ``cd /somewhere``
-        persists, so the next command runs in that directory.  Use ``pwd`` to
-        check the current directory at any time.
+        Use ``data_transfer`` for file uploads/downloads. Commands should be
+        non-interactive.
 
-        For file uploads and downloads, prefer ``data_transfer`` (SFTP) over
-        shell commands like ``cp``, ``scp``, or ``cat``.
-
-        Returns ``{stdout, stderr, exit_code, cwd}``.
+        Returns ``{output, exit_code, cwd}``.
         """
         mgr = ctx.lifespan_context["manager"]
         try:
@@ -83,7 +88,7 @@ def register_tools(mcp):
             logger.warning("Client '%s' not found", client_name)
             raise ToolError(str(e), log_level=logging.INFO) from None
         result = await session.exec(command, timeout=timeout)
-        return {k: result[k] for k in ("stdout", "stderr", "exit_code", "cwd")}
+        return {k: result[k] for k in ("output", "exit_code", "cwd")}
 
     @mcp.tool(
         title="List Remote Hosts",
@@ -93,17 +98,23 @@ def register_tools(mcp):
         ),
     )
     def list_remote_clients(ctx: Context = CurrentContext()) -> list[RemoteClientInfo]:
-        """List all enabled remote hosts configured in the web dashboard.
+        """List all enabled remote hosts.
 
-        Use the returned ``name`` value as ``client_name`` for
-        ``remote_shell`` and ``data_transfer``.
-
-        Returns ``[{name, host, port, user, cwd, safe_rm}, ...]``.
+        Returns ``[{client_name, host, port, user, cwd, safe_rm}, ...]``.
         An empty list means no hosts are configured yet.
         """
         mgr = ctx.lifespan_context["manager"]
-        clients = [{k: c[k] for k in ("name", "host", "port", "user", "cwd", "safe_rm")}
-                    for c in mgr.list_enabled()]
+        clients = [
+            {
+                "client_name": c["name"],
+                "host": c["host"],
+                "port": c["port"],
+                "user": c["user"],
+                "cwd": c["cwd"],
+                "safe_rm": c["safe_rm"],
+            }
+            for c in mgr.list_enabled()
+        ]
         if not clients:
             return [{"_message": (
                 "No remote hosts configured yet.  Open the RemoteBash dashboard at "
@@ -122,18 +133,20 @@ def register_tools(mcp):
     )
     async def data_transfer(
         client_name: Annotated[
-            str, Field(description="Name of the remote host. Call list_remote_clients first — do not guess.")
+            str, Field(description="Remote host name from list_remote_clients.")
         ],
         src: Annotated[
             str, Field(
                 description="Source file path. When direction is 'local2remote', this is a "
-                            "**local** path; when 'remote2local', this is a **remote** path."
+                            "path on the RemoteBash server machine; when 'remote2local', "
+                            "this is a path on the remote SSH host."
             )
         ],
         dst: Annotated[
             str, Field(
                 description="Destination file path. When direction is 'local2remote', this is a "
-                            "**remote** path; when 'remote2local', this is a **local** path."
+                            "path on the remote SSH host; when 'remote2local', this is a "
+                            "path on the RemoteBash server machine."
             )
         ],
         direction: Annotated[
@@ -144,10 +157,9 @@ def register_tools(mcp):
         ] = "local2remote",
         ctx: Context = CurrentContext(),
     ) -> DataTransferOutput:
-        """Transfer files between the local machine and a remote host via SFTP.
+        """Transfer files between this server and a remote host via SFTP.
 
-        For general command execution (shell commands, scripts, etc.), use
-        ``remote_shell`` instead.
+        Use ``remote_shell`` for command execution.
 
         Returns ``{success, direction, src, dst, size_bytes, duration_ms}``.
         """

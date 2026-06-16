@@ -27,7 +27,7 @@ uv run remotebash --port 24587
 uv run python -m unittest discover -s tests
 ```
 
-Unit tests live under `tests/` and use stdlib `unittest`. They exercise the pure helpers (`_parse_exec_output`, `_build_remote_command`) and the `PersistentShell` via a fake asyncssh process (no real SSH). Use `uv add <pkg>` / `uv remove <pkg>` to manage dependencies.
+Unit tests live under `tests/` and use stdlib `unittest`. They exercise `PersistentShell` via a fake asyncssh process (no real SSH). Use `uv add <pkg>` / `uv remove <pkg>` to manage dependencies.
 
 ## Architecture
 
@@ -66,7 +66,7 @@ A WebSocket at `/api/clients/{name}/terminal` bridges xterm.js to a separate `Pe
 
 SQLite via aiosqlite with `row_factory = aiosqlite.Row`. Two tables:
 - `clients` — SSH connection configs (name PK, host, port, user, password, label, enabled, timestamps).
-- `audit_log` — full command history (client FK, command, stdout, stderr, exit_code, cwd, duration_ms, success, timestamp). Indexed on `client_name` and `created_at`.
+- `audit_log` — full command history (client FK, command, output, exit_code, cwd, duration_ms, success, timestamp). Indexed on `client_name` and `created_at`.
 
 The `open_db()` function creates parent directories if needed and runs schema migration on every open (all DDL uses `IF NOT EXISTS` / `IF NOT EXISTS`).
 
@@ -77,9 +77,9 @@ Holds an in-memory `dict[str, RemoteSession]` synchronized with the DB, plus a `
 ### MCP tools (`remotebash/api/tools.py`)
 
 Three tools:
-- `remote_shell(client_name, command, timeout=30)` — executes a command, returns `{stdout, stderr, exit_code, cwd}`.
+- `remote_shell(client_name, command, timeout=30)` — executes a command, returns `{output, exit_code, cwd}`.
 - `data_transfer(client_name, src, dst, direction="remote2local")` — SFTP file transfer, returns `{success, direction, src, dst, size_bytes, duration_ms}`.
-- `list_remote_clients()` — returns only **enabled** clients with `{name, host, port, user, cwd, label}`.
+- `list_remote_clients()` — returns only **enabled** clients with `{client_name, host, port, user, cwd, safe_rm}`.
 
 Both access the manager via `ctx.lifespan_context["manager"]`.
 

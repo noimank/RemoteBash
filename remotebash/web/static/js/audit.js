@@ -96,14 +96,10 @@ function openDetail(idx) {
   document.getElementById("mdCmd").textContent = entry.command || "(空)";
   document.getElementById("mdCwd").textContent = entry.cwd || "~";
   document.getElementById("mdDuration").textContent = entry.duration_ms + "ms";
-  const out = entry.stdout || "";
-  const err = entry.stderr || "";
-  document.getElementById("mdOut").textContent = out || "(空)";
-  document.getElementById("mdOut").className = out ? "text-xs text-gray-300 bg-surface px-3 py-2.5 rounded-lg overflow-x-auto max-h-72 overflow-y-auto whitespace-pre-wrap break-all" : "text-xs text-muted italic bg-surface px-3 py-2.5 rounded-lg";
-  document.getElementById("mdOutSize").textContent = out ? "(" + formatSize(out.length) + ")" : "";
-  document.getElementById("mdErr").textContent = err || "(空)";
-  document.getElementById("mdErr").className = err ? "text-xs text-red/70 bg-surface px-3 py-2.5 rounded-lg overflow-x-auto max-h-72 overflow-y-auto whitespace-pre-wrap break-all" : "text-xs text-muted italic bg-surface px-3 py-2.5 rounded-lg";
-  document.getElementById("mdErrSize").textContent = err ? "(" + formatSize(err.length) + ")" : "";
+  const output = entry.output || "";
+  document.getElementById("mdOutput").textContent = output || "(空)";
+  document.getElementById("mdOutput").className = output ? "text-xs text-gray-300 bg-surface px-3 py-2.5 rounded-lg overflow-x-auto max-h-72 overflow-y-auto whitespace-pre-wrap break-all" : "text-xs text-muted italic bg-surface px-3 py-2.5 rounded-lg";
+  document.getElementById("mdOutputSize").textContent = output ? "(" + formatSize(output.length) + ")" : "";
   m.classList.remove("hidden");
   m.classList.add("flex");
 }
@@ -127,15 +123,13 @@ function renderAudit(entries) {
     return;
   }
   list.innerHTML = entries.map((e, i) => {
-    const hasOut = e.stdout && e.stdout.length > 0;
-    const hasErr = e.stderr && e.stderr.length > 0;
+    const hasOutput = e.output && e.output.length > 0;
     return `
     <div class="bg-surface border border-border rounded-lg hover:border-border-hover transition-colors group">
       <div class="flex items-center gap-1.5 px-3 py-2">
         <input type="checkbox" class="audit-checkbox w-3.5 h-3.5 rounded border-border accent-accent cursor-pointer shrink-0"
                data-id="${e.id}" onchange="toggleSelect(${e.id}, this.checked)" title="选择此条记录">
-        ${hasOut ? '<span class="w-1.5 h-1.5 rounded-full bg-green shrink-0" title="stdout: ' + formatSize(e.stdout.length) + '"></span>' : ''}
-        ${hasErr ? '<span class="w-1.5 h-1.5 rounded-full bg-red shrink-0" title="stderr: ' + formatSize(e.stderr.length) + '"></span>' : ''}
+        ${hasOutput ? '<span class="w-1.5 h-1.5 rounded-full bg-green shrink-0" title="output: ' + formatSize(e.output.length) + '"></span>' : ''}
         <span class="text-[11px] text-muted w-[160px] shrink-0">${formatTime(e.created_at)}</span>
         <code class="text-accent text-[11px] font-mono w-[88px] shrink-0 truncate" title="${escapeHtml(e.client_name)}">${e.client_name}</code>
         <code class="text-xs text-gray-300 font-mono truncate flex-1 min-w-0" title="${escapeHtml(e.command)}">$ ${escapeHtml(e.command)}</code>

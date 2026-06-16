@@ -16,9 +16,7 @@ text.
 
 Output preservation
 -------------------
-* **stdout** is the command's stdout, ANSI-stripped and decoded.
-* **stderr** is empty — a PTY merges stdout/stderr into one stream, so all
-  output lands in ``stdout``.
+* **output** is the merged PTY output, ANSI-stripped and decoded.
 * **exit_code** and **cwd** come from the completion sentinel (exact, even for
   builtins like ``cd``).
 """
@@ -274,9 +272,7 @@ class RemoteSession:
     async def exec(self, command, timeout=30):
         """Run ``command`` on the persistent interactive shell.
 
-        Returns ``{stdout, stderr, exit_code, cwd, duration_ms}``.  Because
-        the shell is a PTY, stdout and stderr are merged into ``stdout`` and
-        ``stderr`` is always ``""``.
+        Returns ``{output, exit_code, cwd, duration_ms}``.
         """
         if not self.enabled:
             raise RuntimeError(f"Client '{self.name}' is disabled.")

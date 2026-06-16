@@ -23,7 +23,7 @@ returned as command output.
 Two consumption modes
 ---------------------
 * :meth:`run`  — used by the MCP ``remote_shell`` tool.  Returns clean,
-  ANSI-stripped ``{stdout, stderr, exit_code, cwd}`` for one command.
+  ANSI-stripped ``{output, exit_code, cwd}`` for one command.
 * :meth:`feed_raw` + :meth:`attach_tap` — used by the in-browser xterm.js
   terminal.  Bytes flow through raw (colours preserved); the browser renders.
   The terminal path uses a human-readable PS1 and a one-shot readiness
@@ -332,12 +332,9 @@ class PersistentShell:
     async def run(self, command: str, *, timeout: float = 30):
         """Run one command on the persistent shell and return its result.
 
-        Returns ``{stdout, stderr, exit_code, cwd, duration_ms}``.  Because
-        the shell is a PTY, stdout and stderr are interleaved into a single
-        stream; ``stderr`` is therefore empty and the full text is in
-        ``stdout`` (ANSI-stripped).  ``exit_code`` comes from ``$?`` captured
-        immediately after the command, so it is exact even for builtins like
-        ``cd``.
+        Returns ``{output, exit_code, cwd, duration_ms}``. ``exit_code`` comes
+        from ``$?`` captured immediately after the command, so it is exact even
+        for builtins like ``cd``.
         """
         t0 = time.monotonic()
         raw_output, exit_code, cwd, token = await self._run_framed(
@@ -349,8 +346,7 @@ class PersistentShell:
         clean = self._clean_output(raw_output, command, token=token)
 
         return {
-            "stdout": clean,
-            "stderr": "",                 # PTY merges streams; see docstring
+            "output": clean,
             "exit_code": exit_code,
             "cwd": cwd,
             "duration_ms": elapsed,

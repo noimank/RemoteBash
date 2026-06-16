@@ -44,11 +44,11 @@ class ConnectionManager:
 
     async def _on_audit(self, client_name, command, result):
         await self.db.execute(
-            """INSERT INTO audit_log (client_name, command, stdout, stderr,
+            """INSERT INTO audit_log (client_name, command, output,
                exit_code, cwd, duration_ms, success)
-               VALUES (:c, :cmd, :so, :se, :ec, :wd, :ms, :ok)""",
+               VALUES (:c, :cmd, :out, :ec, :wd, :ms, :ok)""",
             dict(c=client_name, cmd=command,
-                 so=result["stdout"], se=result["stderr"],
+                 out=result["output"],
                  ec=result["exit_code"], wd=result["cwd"],
                  ms=result["duration_ms"],
                  ok=1 if result["exit_code"] == 0 else 0),

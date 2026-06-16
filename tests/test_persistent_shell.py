@@ -222,8 +222,7 @@ class PersistentShellRunTest(unittest.TestCase):
         r = _run(go())
         self.assertEqual(r["exit_code"], 0)
         self.assertEqual(r["cwd"], "/root")
-        self.assertEqual(r["stdout"], "file1\nfile2\n")
-        self.assertEqual(r["stderr"], "")
+        self.assertEqual(r["output"], "file1\nfile2\n")
 
     def test_run_strips_ansi_from_output(self):
         async def go():
@@ -235,7 +234,7 @@ class PersistentShellRunTest(unittest.TestCase):
                        output=b"\x1b[32mgreen\x1b[0m\n")
             return await run_task
         r = _run(go())
-        self.assertEqual(r["stdout"], "green\n")
+        self.assertEqual(r["output"], "green\n")
 
     def test_run_reports_nonzero_exit_code(self):
         async def go():
@@ -247,7 +246,7 @@ class PersistentShellRunTest(unittest.TestCase):
             return await run_task
         r = _run(go())
         self.assertEqual(r["exit_code"], 1)
-        self.assertIn("err", r["stdout"])
+        self.assertIn("err", r["output"])
 
     def test_wrapper_disables_and_restores_errexit(self):
         payload = PersistentShell._build_payload("false", "abc123")
@@ -311,7 +310,7 @@ class PersistentShellRunTest(unittest.TestCase):
         r = _run(go())
         self.assertEqual(r["exit_code"], 0)
         # Output must NOT have a leading newline from idle bytes.
-        self.assertEqual(r["stdout"], "file1\nfile2\n")
+        self.assertEqual(r["output"], "file1\nfile2\n")
 
 
 class PersistentShellTapTest(unittest.TestCase):
