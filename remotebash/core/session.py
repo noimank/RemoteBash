@@ -287,8 +287,26 @@ class RemoteSession:
         try:
             r = await shell.run(command, timeout=timeout)
         except (asyncssh.Error, OSError) as exc:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            if self._audit_cb:
+                await self._audit_cb(self.name, command, {
+                    "output": f"SSH command failed: {exc}",
+                    "exit_code": -1,
+                    "cwd": self._cwd,
+                    "duration_ms": elapsed,
+                })
             await self.disconnect()
             raise RuntimeError(f"SSH command failed: {exc}") from exc
+        except RuntimeError as exc:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            if self._audit_cb:
+                await self._audit_cb(self.name, command, {
+                    "output": str(exc),
+                    "exit_code": -1,
+                    "cwd": self._cwd,
+                    "duration_ms": elapsed,
+                })
+            raise
 
         self._cwd = r.get("cwd", self._cwd)
         if self._audit_cb:
