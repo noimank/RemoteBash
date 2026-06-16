@@ -8,6 +8,18 @@
         <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
         审计日志
         <span id="totalCount" class="text-xs text-muted font-normal ml-1"></span>
+        <div class="flex items-center gap-1 ml-auto" id="pollingGroup">
+          <select id="pollInterval" onchange="setPollInterval(this.value)" class="rounded-md bg-surface border border-border px-1.5 py-1 text-[10px] text-gray-300 focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent" title="轮询间隔">
+            <option value="5000" selected>5s</option>
+            <option value="10000">10s</option>
+            <option value="30000">30s</option>
+            <option value="60000">60s</option>
+          </select>
+          <button type="button" id="pollToggleBtn" onclick="togglePolling()" class="rounded-md border border-border hover:border-accent text-muted hover:text-white text-[10px] px-2 py-1 transition-colors font-medium flex items-center gap-1" title="自动刷新">
+            <span id="pollDot" class="w-1.5 h-1.5 rounded-full bg-muted shrink-0"></span>
+            轮询刷新
+          </button>
+        </div>
       </h2>
       <div class="flex flex-wrap items-center gap-3 mb-4 shrink-0 bg-surface rounded-xl border border-border p-3">
         <label class="flex items-center gap-1 cursor-pointer select-none shrink-0" title="全选/取消全选当前页">

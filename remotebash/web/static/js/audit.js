@@ -115,20 +115,27 @@ document.addEventListener("keydown", e => { if (e.key === "Escape") closeDetail(
 function renderAudit(entries) {
   const list = document.getElementById("auditList");
   currentEntries = entries;
-  selectedIds.clear();
-  updateSelectionUI();
+
+  // 保留仍在当前页中的选中项（轮询刷新时不清空跨页选择）
+  const survivingIds = new Set();
+  for (const id of selectedIds) {
+    if (entries.some(e => e.id === id)) survivingIds.add(id);
+  }
+  selectedIds = survivingIds;
 
   if (!entries.length) {
     list.innerHTML = '<div class="text-center py-12 text-muted text-sm">暂无审计记录。</div>';
+    updateSelectionUI();
     return;
   }
   list.innerHTML = entries.map((e, i) => {
     const hasOutput = e.output && e.output.length > 0;
+    const checked = selectedIds.has(e.id) ? " checked" : "";
     return `
     <div class="bg-surface border border-border rounded-lg hover:border-border-hover transition-colors group">
       <div class="flex items-center gap-1.5 px-3 py-2">
         <input type="checkbox" class="audit-checkbox w-3.5 h-3.5 rounded border-border accent-accent cursor-pointer shrink-0"
-               data-id="${e.id}" onchange="toggleSelect(${e.id}, this.checked)" title="选择此条记录">
+               data-id="${e.id}" onchange="toggleSelect(${e.id}, this.checked)"${checked} title="选择此条记录">
         ${hasOutput ? '<span class="w-1.5 h-1.5 rounded-full bg-green shrink-0" title="output: ' + formatSize(e.output.length) + '"></span>' : ''}
         <span class="text-[11px] text-muted w-[160px] shrink-0">${formatTime(e.created_at)}</span>
         <code class="text-accent text-[11px] font-mono w-[88px] shrink-0 truncate" title="${escapeHtml(e.client_name)}">${e.client_name}</code>
@@ -140,6 +147,8 @@ function renderAudit(entries) {
       </div>
     </div>`;
   }).join("");
+
+  updateSelectionUI();
 }
 
 // ---------------------------------------------------------------------------
@@ -172,14 +181,18 @@ function toISO(val) {
   return new Date(val).toISOString();
 }
 
-async function refreshAudit() {
+async function refreshAudit(silent) {
   const client = document.getElementById("filterClient").value;
   const after = toISO(document.getElementById("filterAfter").value);
   const before = toISO(document.getElementById("filterBefore").value);
 
-  const btn = document.querySelector("button[onclick='refreshAudit()']");
-  const origText = btn ? btn.textContent : "筛选";
-  if (btn) { btn.textContent = "筛选…"; btn.disabled = true; }
+  // 轮询刷新时跳过按钮状态变化，避免闪烁
+  let btn, origText;
+  if (!silent) {
+    btn = document.querySelector("button[onclick='refreshAudit()']");
+    origText = btn ? btn.textContent : "筛选";
+    if (btn) { btn.textContent = "筛选…"; btn.disabled = true; }
+  }
 
   let url = AUDIT_API + "?limit=" + PAGE_SIZE + "&offset=" + (currentPage * PAGE_SIZE);
   if (client) url += "&client_name=" + encodeURIComponent(client);
@@ -193,9 +206,9 @@ async function refreshAudit() {
     updatePagination();
     document.getElementById("totalCount").textContent = "（共 " + totalEntries + " 条）";
   } catch (e) {
-    toast(e.message, true);
+    if (!silent) toast(e.message, true);
   } finally {
-    if (btn) { btn.textContent = origText; btn.disabled = false; }
+    if (!silent && btn) { btn.textContent = origText; btn.disabled = false; }
   }
 }
 
@@ -306,6 +319,93 @@ function clearFilters() {
   currentPage = 0;
   refreshAudit();
 }
+
+// ---------------------------------------------------------------------------
+// 轮询刷新
+// ---------------------------------------------------------------------------
+
+let pollTimer = null;
+let pollIntervalMs = 5000;
+
+function setPollInterval(val) {
+  pollIntervalMs = parseInt(val);
+  // 如果正在轮询，重启以应用新间隔
+  if (pollTimer !== null) {
+    stopPolling();
+    startPolling();
+  }
+}
+
+function togglePolling() {
+  if (pollTimer !== null) {
+    stopPolling();
+  } else {
+    startPolling();
+  }
+}
+
+function startPolling() {
+  if (pollTimer !== null) return;
+
+  const btn = document.getElementById("pollToggleBtn");
+  const dot = document.getElementById("pollDot");
+  btn.classList.add("border-accent", "text-accent");
+  btn.classList.remove("border-border", "text-muted");
+  dot.classList.remove("bg-muted");
+  dot.classList.add("bg-green", "animate-pulse");
+  btn.title = "停止自动刷新";
+
+  pollTimer = setInterval(() => {
+    requestAnimationFrame(() => refreshAudit(true));
+  }, pollIntervalMs);
+
+  // 页面隐藏时暂停，显示时恢复
+  document.addEventListener("visibilitychange", onVisibilityChange);
+}
+
+function stopPolling() {
+  if (pollTimer === null) return;
+
+  clearInterval(pollTimer);
+  pollTimer = null;
+
+  const btn = document.getElementById("pollToggleBtn");
+  const dot = document.getElementById("pollDot");
+  btn.classList.remove("border-accent", "text-accent");
+  btn.classList.add("border-border", "text-muted");
+  dot.classList.add("bg-muted");
+  dot.classList.remove("bg-green", "animate-pulse");
+  btn.title = "自动刷新";
+
+  document.removeEventListener("visibilitychange", onVisibilityChange);
+}
+
+function onVisibilityChange() {
+  if (document.hidden) {
+    // 页面隐藏 → 暂停轮询，记录偏移量
+    if (pollTimer !== null) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      document.getElementById("pollDot").classList.remove("bg-green", "animate-pulse");
+      document.getElementById("pollDot").classList.add("bg-yellow");
+    }
+  } else {
+    // 页面可见 → 立即刷新并恢复轮询
+    if (pollTimer === null) {
+      refreshAudit(true);
+      pollTimer = setInterval(() => {
+        requestAnimationFrame(() => refreshAudit(true));
+      }, pollIntervalMs);
+      document.getElementById("pollDot").classList.remove("bg-yellow");
+      document.getElementById("pollDot").classList.add("bg-green", "animate-pulse");
+    }
+  }
+}
+
+// 页面卸裁时清理
+window.addEventListener("beforeunload", () => {
+  if (pollTimer !== null) clearInterval(pollTimer);
+});
 
 // ---------------------------------------------------------------------------
 // 初始化
