@@ -81,6 +81,7 @@ class RemoteSession:
         self._conn = None
         self._shell = None              # PersistentShell — lazily started
         self._shell_lock = asyncio.Lock()  # guards _ensure_shell() against races
+        self._exec_lock = asyncio.Lock()   # serialises concurrent exec() callers
         self._cwd = "~"
         self._audit_cb = None
 
@@ -273,45 +274,54 @@ class RemoteSession:
         """Run ``command`` on the persistent interactive shell.
 
         Returns ``{output, exit_code, cwd, duration_ms}``.
+
+        The persistent shell can only execute one command at a time, so
+        concurrent ``exec()`` callers are serialised: the second one queues on
+        ``_exec_lock`` and runs once the first finishes, instead of racing on
+        the shell and failing.  Execution order follows arrival order.
         """
         if not self.enabled:
             raise RuntimeError(f"Client '{self.name}' is disabled.")
 
-        try:
-            shell = await self._ensure_shell()
-        except (asyncssh.Error, OSError, RuntimeError) as exc:
-            await self.disconnect()
-            raise RuntimeError(f"SSH shell setup failed: {exc}") from exc
+        async with self._exec_lock:
+            # _ensure_shell() stays INSIDE the lock: a queued caller must
+            # re-check the shell after waiting, since the prior command may
+            # have torn it down (timeout / SSH error) while it was queued.
+            try:
+                shell = await self._ensure_shell()
+            except (asyncssh.Error, OSError, RuntimeError) as exc:
+                await self.disconnect()
+                raise RuntimeError(f"SSH shell setup failed: {exc}") from exc
 
-        t0 = time.monotonic()
-        try:
-            r = await shell.run(command, timeout=timeout)
-        except (asyncssh.Error, OSError) as exc:
-            elapsed = int((time.monotonic() - t0) * 1000)
-            if self._audit_cb:
-                await self._audit_cb(self.name, command, {
-                    "output": f"SSH command failed: {exc}",
-                    "exit_code": -1,
-                    "cwd": self._cwd,
-                    "duration_ms": elapsed,
-                })
-            await self.disconnect()
-            raise RuntimeError(f"SSH command failed: {exc}") from exc
-        except RuntimeError as exc:
-            elapsed = int((time.monotonic() - t0) * 1000)
-            if self._audit_cb:
-                await self._audit_cb(self.name, command, {
-                    "output": str(exc),
-                    "exit_code": -1,
-                    "cwd": self._cwd,
-                    "duration_ms": elapsed,
-                })
-            raise
+            t0 = time.monotonic()
+            try:
+                r = await shell.run(command, timeout=timeout)
+            except (asyncssh.Error, OSError) as exc:
+                elapsed = int((time.monotonic() - t0) * 1000)
+                if self._audit_cb:
+                    await self._audit_cb(self.name, command, {
+                        "output": f"SSH command failed: {exc}",
+                        "exit_code": -1,
+                        "cwd": self._cwd,
+                        "duration_ms": elapsed,
+                    })
+                await self.disconnect()
+                raise RuntimeError(f"SSH command failed: {exc}") from exc
+            except RuntimeError as exc:
+                elapsed = int((time.monotonic() - t0) * 1000)
+                if self._audit_cb:
+                    await self._audit_cb(self.name, command, {
+                        "output": str(exc),
+                        "exit_code": -1,
+                        "cwd": self._cwd,
+                        "duration_ms": elapsed,
+                    })
+                raise
 
-        self._cwd = r.get("cwd", self._cwd)
-        if self._audit_cb:
-            await self._audit_cb(self.name, command, r)
-        return r
+            self._cwd = r.get("cwd", self._cwd)
+            if self._audit_cb:
+                await self._audit_cb(self.name, command, r)
+            return r
 
     async def open_terminal_shell(self) -> PersistentShell:
         """Open a **separate** PersistentShell for the browser terminal.
