@@ -177,7 +177,7 @@ goose configure
 
 | 工具 | 说明 |
 |------|------|
-| `remote_shell` | 在远程主机执行命令，自动追踪工作目录 |
+| `remote_bash` | 在远程主机执行 bash 命令，工作目录跨命令持久 |
 | `data_transfer` | SFTP 文件传输（上传/下载），支持通配符和自动展开 `~` |
 | `list_remote_clients` | 列出所有已启用的 SSH 主机 |
 
@@ -247,7 +247,7 @@ DELETE /api/audit                清除审计日志（支持单条 / 按主机 /
 
 ### 会话状态持久（常驻 PTY shell）
 
-RemoteBash 为每个 SSH 连接维护一个**常驻的交互式 bash shell（分配真实 PTY）**，而不是每条命令 fork 一个一次性的 `/bin/bash -c`。这让通过 `remote_shell` 工具执行命令的体验与直接登录远程机器**完全一致**：
+RemoteBash 为每个 SSH 连接维护一个**常驻的交互式 bash shell（分配真实 PTY）**，而不是每条命令 fork 一个一次性的 `/bin/bash -c`。这让通过 `remote_bash` 工具执行命令的体验与直接登录远程机器**完全一致**：
 
 - `cd`、`export`、shell 函数、别名、`umask`、`history` 等**所有 shell 状态**跨命令持久
 - 程序被分配 PTY，「以为自己在真终端」→ 颜色输出、`isatty()` 判断、交互式提示（`read`、`top`、`vim`）行为全部正确

@@ -22,7 +22,7 @@ returned as command output.
 
 Two consumption modes
 ---------------------
-* :meth:`run`  — used by the MCP ``remote_shell`` tool.  Returns clean,
+* :meth:`run`  — used by the MCP ``remote_bash`` tool.  Returns clean,
   ANSI-stripped ``{output, exit_code, cwd}`` for one command.
 * :meth:`feed_raw` + :meth:`attach_tap` — used by the in-browser xterm.js
   terminal.  Bytes flow through raw (colours preserved); the browser renders.
@@ -390,7 +390,7 @@ class PersistentShell:
             await self.close()
             detail = (
                 f"Command timed out after {timeout}s.\n"
-                "remote_shell cannot answer interactive prompts. The command "
+                "remote_bash cannot answer interactive prompts. The command "
                 "may be waiting for input; retry with non-interactive flags or "
                 "include the required input in the command.\n"
                 "The remote shell session was reset."

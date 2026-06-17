@@ -378,7 +378,7 @@ class PersistentShellRunTest(unittest.TestCase):
             "rm: remove regular file 'k8s\\.zip'\\?",
         ) as cm:
             _run(go())
-        self.assertIn("remote_shell cannot answer interactive prompts", str(cm.exception))
+        self.assertIn("remote_bash cannot answer interactive prompts", str(cm.exception))
         self.assertIn("Output captured before timeout:", str(cm.exception))
         self.assertNotIn("__RBSH_START__", str(cm.exception))
 

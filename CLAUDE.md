@@ -77,7 +77,7 @@ Holds an in-memory `dict[str, RemoteSession]` synchronized with the DB, plus a `
 ### MCP tools (`remotebash/api/tools.py`)
 
 Three tools:
-- `remote_shell(client_name, command, timeout=30)` — executes a command, returns `{output, exit_code, cwd}`.
+- `remote_bash(client_name, command, timeout=30)` — executes a bash command, returns `{output, exit_code, cwd}`.
 - `data_transfer(client_name, src, dst, direction="remote2local")` — SFTP file transfer, returns `{success, direction, src, dst, size_bytes, duration_ms}`.
 - `list_remote_clients()` — returns only **enabled** clients with `{client_name, host, port, user, cwd, safe_rm}`.
 
@@ -91,7 +91,7 @@ CRUD at `/api/clients` plus `/api/clients/{name}/connect|disconnect|test`. Clien
 
 Two pages: dashboard (`/`) and audit (`/audit`). Both extend `base.html.j2` with a dark Tailwind theme (custom `surface`, `border`, `accent` colors). Tailwind CSS is vendored locally as `static/tailwind.js` (no build step, no CDN dependency). The dashboard is a SPA — all management interactions go through the REST API via vanilla JS (`app.js` and `audit.js`). Templates are split into partials (`header.html.j2`, `add_form.html.j2`, `client_list.html.j2`).
 
-The **in-browser terminal** is a full interactive PTY session rendered by xterm.js (vendored locally at `static/js/vendor/xterm.js` + `xterm-addon-fit.js`, CSS at `static/css/xterm.css`). `terminal.js` opens a WebSocket to the terminal endpoint, forwards keystrokes as binary frames, renders incoming bytes, and sends resize messages. Each client row has a 「终端」 button that opens the terminal modal (`partials/terminal_modal.html.j2`). Terminal I/O is **not** written to the audit log (only MCP `remote_shell` calls are audited).
+The **in-browser terminal** is a full interactive PTY session rendered by xterm.js (vendored locally at `static/js/vendor/xterm.js` + `xterm-addon-fit.js`, CSS at `static/css/xterm.css`). `terminal.js` opens a WebSocket to the terminal endpoint, forwards keystrokes as binary frames, renders incoming bytes, and sends resize messages. Each client row has a 「终端」 button that opens the terminal modal (`partials/terminal_modal.html.j2`). Terminal I/O is **not** written to the audit log (only MCP `remote_bash` calls are audited).
 
 ### Config (`remotebash/config.py`)
 
