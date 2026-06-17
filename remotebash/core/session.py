@@ -82,6 +82,7 @@ class RemoteSession:
         self._shell = None              # PersistentShell — lazily started
         self._shell_lock = asyncio.Lock()  # guards _ensure_shell() against races
         self._exec_lock = asyncio.Lock()   # serialises concurrent exec() callers
+        self._connect_lock = asyncio.Lock()  # guards connect() against TOCTOU races
         self._cwd = "~"
         self._audit_cb = None
 
@@ -127,14 +128,15 @@ class RemoteSession:
     async def connect(self):
         if not self.enabled:
             raise RuntimeError(f"Client '{self.name}' is disabled.")
-        if self.connected:
-            return
-        self._conn = await asyncssh.connect(
-            self._host, port=self._port, username=self._user,
-            password=self._password, client_keys=[], known_hosts=None,
-            keepalive_interval=30, keepalive_count_max=3,
-        )
-        self._cwd = "~"
+        async with self._connect_lock:
+            if self.connected:
+                return
+            self._conn = await asyncssh.connect(
+                self._host, port=self._port, username=self._user,
+                password=self._password, client_keys=[], known_hosts=None,
+                keepalive_interval=30, keepalive_count_max=3,
+            )
+            self._cwd = "~"
 
     async def disconnect(self):
         if self._shell is not None:
