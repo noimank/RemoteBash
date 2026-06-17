@@ -24,6 +24,36 @@ function toast(msg, isErr) {
 }
 
 // ---------------------------------------------------------------------------
+// 复制
+// ---------------------------------------------------------------------------
+
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    // 非安全上下文（如局域网 IP 访问）回退到 execCommand
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function copyName(name) {
+  const ok = await copyToClipboard(name);
+  toast(ok ? "已复制: " + name : "复制失败", !ok);
+}
+
+// ---------------------------------------------------------------------------
 // API 封装
 // ---------------------------------------------------------------------------
 
@@ -58,7 +88,7 @@ function renderClient(c) {
   return `
     <div class="flex items-center gap-4 py-3.5 px-2 border-b border-border last:border-b-0 flex-wrap hover:bg-surface/50 rounded-lg transition-colors -mx-2">
       ${statusDot(c.connected, c.enabled)}
-      <code class="text-accent text-[13px] font-mono w-24 shrink-0">${c.name}</code>
+      <code onclick="copyName('${js(c.name)}')" class="text-accent text-[13px] font-mono w-[8.4rem] shrink-0 cursor-pointer hover:underline" title="点击复制名称">${c.name}</code>
       <span class="font-medium text-sm min-w-[140px]">${c.host}:${c.port}</span>
       <span class="text-muted text-xs">${c.user}</span>
       <span class="text-muted text-xs max-w-[200px] truncate" title="${c.cwd || "~"}">${c.cwd || "~"}</span>

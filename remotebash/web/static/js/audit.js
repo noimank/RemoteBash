@@ -110,6 +110,47 @@ function closeDetail() {
   m.classList.remove("flex");
 }
 
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    // 非安全上下文（如局域网 IP 访问）回退到 execCommand
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+function flashCopyLabel(labelId) {
+  const label = document.getElementById(labelId);
+  if (!label) return;
+  const orig = label.textContent;
+  label.textContent = "已复制";
+  setTimeout(() => { label.textContent = orig; }, 1500);
+}
+
+async function copyCommand() {
+  const ok = await copyToClipboard(document.getElementById("mdCmd").textContent);
+  if (ok) { toast("已复制命令"); flashCopyLabel("copyCmdLabel"); }
+  else toast("复制失败", true);
+}
+
+async function copyOutput() {
+  const ok = await copyToClipboard(document.getElementById("mdOutput").textContent);
+  if (ok) { toast("已复制输出"); flashCopyLabel("copyOutputLabel"); }
+  else toast("复制失败", true);
+}
+
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeDetail(); });
 
 function renderAudit(entries) {
