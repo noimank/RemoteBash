@@ -55,6 +55,19 @@ class ConnectionManager:
         )
         await self.db.commit()
 
+    async def audit_log(self, client_name, command, output, exit_code,
+                        cwd, duration_ms, success):
+        """Write a generic audit record — shared by exec() and data_transfer."""
+        await self.db.execute(
+            """INSERT INTO audit_log (client_name, command, output,
+               exit_code, cwd, duration_ms, success)
+               VALUES (:c, :cmd, :out, :ec, :wd, :ms, :ok)""",
+            dict(c=client_name, cmd=command, out=output,
+                 ec=exit_code, wd=cwd, ms=duration_ms,
+                 ok=1 if success else 0),
+        )
+        await self.db.commit()
+
     # ── Clients ───────────────────────────────────────────────────
 
     async def add(self, name, host, user, password, port=22, enabled=True, safe_rm=False):

@@ -1,6 +1,7 @@
 """MCP tools — remote_bash(), data_transfer(), and list_remote_clients()."""
 
 import logging
+import time
 from typing import Annotated, TypedDict
 
 from fastmcp.dependencies import CurrentContext
@@ -183,6 +184,29 @@ def register_tools(mcp):
         except KeyError as e:
             logger.warning("Client '%s' not found", client_name)
             raise ToolError(str(e), log_level=logging.INFO) from None
-        result = await session.transfer(src, dst, direction)
+
+        direction_label = "上传" if direction == "local2remote" else "下载"
+        cmd_summary = f"[SFTP {direction_label}] {src} → {dst}"
+
+        t0 = time.monotonic()
+        try:
+            result = await session.transfer(src, dst, direction)
+            output = (
+                f"success: true\n"
+                f"src: {src}\n"
+                f"dst: {dst}\n"
+                f"size_bytes: {result['size_bytes']}\n"
+                f"duration_ms: {result['duration_ms']}"
+            )
+            await mgr.audit_log(client_name, cmd_summary, output, exit_code=0,
+                                cwd=direction, duration_ms=result["duration_ms"],
+                                success=True)
+        except Exception as exc:
+            elapsed = int((time.monotonic() - t0) * 1000)
+            output = f"error: {exc}"
+            await mgr.audit_log(client_name, cmd_summary, output, exit_code=-1,
+                                cwd=direction, duration_ms=elapsed, success=False)
+            raise
+
         return {k: result[k] for k in ("success", "direction", "src", "dst",
                                         "size_bytes", "duration_ms")}

@@ -80,6 +80,16 @@ function escapeHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+function isSftpEntry(entry) {
+  return entry && entry.command && /^\[SFTP\s/.test(entry.command);
+}
+
+// Parse "[SFTP 上传] /src → /dst" into {label, src, dst}
+function parseSftpCommand(cmd) {
+  const m = cmd.match(/^\[SFTP\s(上传|下载)\]\s(.+?)\s→\s(.+)$/);
+  return m ? { label: m[1], src: m[2], dst: m[3] } : null;
+}
+
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + "B";
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + "KB";
@@ -90,12 +100,70 @@ function openDetail(idx) {
   const entry = currentEntries[idx];
   if (!entry) return;
   const m = document.getElementById("detailModal");
+  const sftp = isSftpEntry(entry);
+  const parsed = sftp ? parseSftpCommand(entry.command) : null;
+
   document.getElementById("mdClient").textContent = entry.client_name;
   document.getElementById("mdTime").textContent = formatTime(entry.created_at);
+
+  // ── SFTP detail layout ──
+  const cmdSection = document.getElementById("cmdSection");
+  const sftpSection = document.getElementById("sftpSection");
+  const detailMeta = document.getElementById("detailMeta");
+
+  if (sftp && parsed && cmdSection && sftpSection) {
+    cmdSection.classList.add("hidden");
+    sftpSection.classList.remove("hidden");
+
+    const isUpload = entry.cwd === "local2remote";
+    document.getElementById("mdDirectionIcon").innerHTML = isUpload
+      ? '<svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16l-4-4m0 0l4-4m-4 4h16m-4 4l4-4m0 0l-4-4"/></svg>'
+      : '<svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>';
+    document.getElementById("mdDirectionTag").textContent = parsed.label;
+    document.getElementById("mdDirectionTag").className = isUpload
+      ? "text-[10px] text-blue-400 bg-blue-400/10 rounded px-1.5 py-0.5"
+      : "text-[10px] text-emerald-400 bg-emerald-400/10 rounded px-1.5 py-0.5";
+    document.getElementById("mdSftpSrc").textContent = parsed.src;
+    document.getElementById("mdSftpDst").textContent = parsed.dst;
+
+    // Parse size from output
+    const sizeMatch = entry.output && entry.output.match(/size_bytes:\s*(\d+)/);
+    const sizeBytes = sizeMatch ? parseInt(sizeMatch[1]) : 0;
+    document.getElementById("mdSftpSize").textContent = formatSize(sizeBytes);
+    document.getElementById("mdSftpSizeRow").classList.toggle("hidden", sizeBytes === 0);
+
+    // Copy button → copy both paths
+    document.getElementById("copyCmdLabel").textContent = "复制路径";
+    const copyTarget = document.getElementById("mdCopyTarget");
+    if (copyTarget) {
+      copyTarget.setAttribute("data-copy-target", "sftp");
+      copyTarget.setAttribute("data-copy-text",
+        (isUpload ? "上传: " : "下载: ") + parsed.src + " → " + parsed.dst);
+    }
+
+    detailMeta.innerHTML = `
+      <div><span class="text-[10px] uppercase tracking-wide">方向</span> <code class="font-mono ml-1">${sftp ? entry.cwd : ""}</code></div>
+      <div><span class="text-[10px] uppercase tracking-wide">文件大小</span> <span class="font-mono ml-1">${formatSize(sizeBytes)}</span></div>
+      <div><span class="text-[10px] uppercase tracking-wide">耗时</span> <span id="mdDuration" class="font-mono ml-1">${entry.duration_ms}ms</span></div>
+    `;
+  } else {
+    if (cmdSection) cmdSection.classList.remove("hidden");
+    if (sftpSection) sftpSection.classList.add("hidden");
+    document.getElementById("mdCmd").textContent = entry.command || "(空)";
+    document.getElementById("copyCmdLabel").textContent = "复制";
+    const copyTarget = document.getElementById("mdCopyTarget");
+    if (copyTarget) {
+      copyTarget.setAttribute("data-copy-target", "command");
+      copyTarget.setAttribute("data-copy-text", entry.command || "");
+    }
+
+    detailMeta.innerHTML = `
+      <div><span class="text-[10px] uppercase tracking-wide">工作目录</span> <code id="mdCwd" class="font-mono ml-1">${entry.cwd || "~"}</code></div>
+      <div><span class="text-[10px] uppercase tracking-wide">耗时</span> <span id="mdDuration" class="font-mono ml-1">${entry.duration_ms}ms</span></div>
+    `;
+  }
+
   document.getElementById("mdExit").innerHTML = exitBadge(entry.exit_code);
-  document.getElementById("mdCmd").textContent = entry.command || "(空)";
-  document.getElementById("mdCwd").textContent = entry.cwd || "~";
-  document.getElementById("mdDuration").textContent = entry.duration_ms + "ms";
   const output = entry.output || "";
   document.getElementById("mdOutput").textContent = output || "(空)";
   document.getElementById("mdOutput").className = output ? "text-xs text-gray-300 bg-surface px-3 py-2.5 rounded-lg overflow-x-auto max-h-72 overflow-y-auto whitespace-pre-wrap break-all" : "text-xs text-muted italic bg-surface px-3 py-2.5 rounded-lg";
@@ -140,8 +208,10 @@ function flashCopyLabel(labelId) {
 }
 
 async function copyCommand() {
-  const ok = await copyToClipboard(document.getElementById("mdCmd").textContent);
-  if (ok) { toast("已复制命令"); flashCopyLabel("copyCmdLabel"); }
+  const target = document.getElementById("mdCopyTarget");
+  const text = (target && target.getAttribute("data-copy-text")) || document.getElementById("mdCmd").textContent;
+  const ok = await copyToClipboard(text);
+  if (ok) { toast("已复制"); flashCopyLabel("copyCmdLabel"); }
   else toast("复制失败", true);
 }
 
@@ -172,6 +242,40 @@ function renderAudit(entries) {
   list.innerHTML = entries.map((e, i) => {
     const hasOutput = e.output && e.output.length > 0;
     const checked = selectedIds.has(e.id) ? " checked" : "";
+    const sftp = isSftpEntry(e);
+
+    if (sftp) {
+      const parsed = parseSftpCommand(e.command);
+      const isUpload = e.cwd === "local2remote";
+      const icon = isUpload
+        ? '<svg class="w-3.5 h-3.5 text-blue-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16l-4-4m0 0l4-4m-4 4h16m-4 4l4-4m0 0l-4-4"/></svg>'
+        : '<svg class="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>';
+      const tag = isUpload
+        ? '<span class="text-[10px] text-blue-400 bg-blue-400/10 rounded px-1 py-px shrink-0">上传</span>'
+        : '<span class="text-[10px] text-emerald-400 bg-emerald-400/10 rounded px-1 py-px shrink-0">下载</span>';
+      const sftpCmd = parsed
+        ? `<code class="text-xs font-mono text-blue-400 truncate" title="${escapeHtml(parsed.src)}">${escapeHtml(parsed.src)}</code>
+           <span class="text-[11px] text-muted shrink-0">→</span>
+           <code class="text-xs font-mono text-emerald-400 truncate" title="${escapeHtml(parsed.dst)}">${escapeHtml(parsed.dst)}</code>`
+        : `<code class="text-xs text-gray-300 font-mono truncate flex-1 min-w-0">${escapeHtml(e.command)}</code>`;
+      return `
+      <div class="bg-surface border border-border rounded-lg hover:border-border-hover transition-colors group">
+        <div class="flex items-center gap-1.5 px-3 py-2">
+          <input type="checkbox" class="audit-checkbox w-3.5 h-3.5 rounded border-border accent-accent cursor-pointer shrink-0"
+                 data-id="${e.id}" onchange="toggleSelect(${e.id}, this.checked)"${checked} title="选择此条记录">
+          ${icon}
+          ${tag}
+          <span class="text-[11px] text-muted w-[160px] shrink-0">${formatTime(e.created_at)}</span>
+          <code class="text-accent text-[11px] font-mono w-[88px] shrink-0 truncate" title="${escapeHtml(e.client_name)}">${e.client_name}</code>
+          <div class="flex items-center gap-1.5 flex-1 min-w-0">${sftpCmd}</div>
+          <span class="text-[11px] text-muted w-[46px] text-right shrink-0">${e.duration_ms}ms</span>
+          ${exitBadge(e.exit_code)}
+          <button onclick="openDetail(${i})" class="ml-1 rounded-md border border-border hover:border-accent hover:text-accent text-muted text-[11px] px-2 py-0.5 transition-colors shrink-0 font-medium">详情</button>
+          <button onclick="deleteEntry(${e.id})" class="rounded-md border border-transparent hover:border-red/30 hover:text-red text-muted text-[11px] px-1.5 py-0.5 transition-colors shrink-0 opacity-0 group-hover:opacity-100 font-medium" title="删除此条记录">&times;</button>
+        </div>
+      </div>`;
+    }
+
     return `
     <div class="bg-surface border border-border rounded-lg hover:border-border-hover transition-colors group">
       <div class="flex items-center gap-1.5 px-3 py-2">
