@@ -35,11 +35,18 @@ _STATIC = Path(__file__).parent / "web" / "static"
 # ═══════════════════════════════════════════════════════════════════════
 
 _server_manager: ConnectionManager | None = None
+_dashboard_url: str | None = None
+
+
+def _dashboard_base_url(host: str, port: int) -> str:
+    """Browser-reachable dashboard URL, normalising wildcard bind addresses."""
+    display = "localhost" if host in ("0.0.0.0", "::", "", None) else host
+    return f"http://{display}:{port}"
 
 
 @asynccontextmanager
 async def _mcp_lifespan(server: FastMCP):
-    yield {"manager": _server_manager}
+    yield {"manager": _server_manager, "dashboard_url": _dashboard_url}
 
 
 mcp = FastMCP("RemoteBash", lifespan=_mcp_lifespan)
@@ -55,11 +62,12 @@ def _mcp_asgi(config: ServerConfig):
 
 @asynccontextmanager
 async def _app_lifespan(app: FastAPI):
-    global _server_manager
+    global _server_manager, _dashboard_url
     db = await open_db(app.state.db_path)
     _server_manager = ConnectionManager(db)
     await _server_manager.load()
     app.state.manager = _server_manager
+    _dashboard_url = _dashboard_base_url(app.state.host, app.state.port)
 
     # Print startup info to stderr for visibility alongside uvicorn logs
     import sys
@@ -95,6 +103,7 @@ def create_app(config: ServerConfig) -> FastAPI:
         lifespan=combine_lifespans(_app_lifespan, mcp_asgi.lifespan),
     )
     app.state.db_path = str(config.db_path)
+    app.state.host = config.host
     app.state.port = config.port
     app.state.transport = config.transport
 

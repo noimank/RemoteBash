@@ -1,4 +1,4 @@
-"""MCP tools — remote_shell(), data_transfer(), and list_remote_clients()."""
+"""MCP tools — remote_bash(), data_transfer(), and list_remote_clients()."""
 
 import logging
 from typing import Annotated, TypedDict
@@ -12,7 +12,7 @@ from pydantic import Field
 logger = logging.getLogger(__name__)
 
 
-class RemoteShellOutput(TypedDict):
+class RemoteBashOutput(TypedDict):
     """Remote command result."""
 
     output: str
@@ -45,22 +45,23 @@ class DataTransferOutput(TypedDict):
 def register_tools(mcp):
 
     @mcp.tool(
-        title="Execute Command on Remote Host",
+        title="Execute Bash Command on Remote Host",
         annotations=ToolAnnotations(
             destructiveHint=True,
             idempotentHint=False,
             openWorldHint=True,
         ),
     )
-    async def remote_shell(
+    async def remote_bash(
         client_name: Annotated[
             str, Field(description="Remote host name from list_remote_clients.")
         ],
         command: Annotated[
             str, Field(
                 description=(
-                    "Bash command to execute on the remote host. Pipes, redirects, "
-                    "builtins, aliases, and functions work."
+                    "Bash command to execute. Runs in a persistent interactive "
+                    "shell, so pipes, redirects, builtins, aliases, functions, "
+                    "and the current working directory behave as in a real terminal."
                 )
             )
         ],
@@ -73,11 +74,17 @@ def register_tools(mcp):
             )
         ] = 30,
         ctx: Context = CurrentContext(),
-    ) -> RemoteShellOutput:
-        """Run a bash command on a remote host.
+    ) -> RemoteBashOutput:
+        """Execute a bash command on a remote host.
 
-        Use ``data_transfer`` for file uploads/downloads. Commands should be
-        non-interactive.
+        Runs against a long-lived, PTY-backed interactive bash shell per host,
+        so working directory, environment, shell functions, aliases, and history
+        persist across calls. Commands must be non-interactive — prompts that
+        wait for input (``rm -i``, password prompts, ``top``, ``vim``) block
+        until the timeout and then reset the session; use non-interactive flags
+        instead.
+
+        Use ``data_transfer`` for file uploads/downloads.
 
         Returns ``{output, exit_code, cwd}``.
         """
@@ -101,7 +108,7 @@ def register_tools(mcp):
         """List all enabled remote hosts.
 
         Returns ``[{client_name, host, port, user, cwd, safe_rm}, ...]``.
-        An empty list means no hosts are configured yet.
+        Raises ``ToolError`` if no hosts are configured yet.
         """
         mgr = ctx.lifespan_context["manager"]
         clients = [
@@ -116,11 +123,13 @@ def register_tools(mcp):
             for c in mgr.list_enabled()
         ]
         if not clients:
-            return [{"_message": (
-                "No remote hosts configured yet.  Open the RemoteBash dashboard at "
-                "http://localhost:24587 to add your SSH hosts, then run "
-                "list_remote_clients again."
-            )}]
+            dashboard_url = ctx.lifespan_context.get("dashboard_url")
+            where = f" at {dashboard_url}" if dashboard_url else ""
+            raise ToolError(
+                f"No remote hosts configured yet. Open the RemoteBash dashboard{where} "
+                "to add your SSH hosts, then run list_remote_clients again.",
+                log_level=logging.INFO,
+            )
         return clients
 
     @mcp.tool(
@@ -159,7 +168,7 @@ def register_tools(mcp):
     ) -> DataTransferOutput:
         """Transfer files between this server and a remote host via SFTP.
 
-        Use ``remote_shell`` for command execution.
+        Use ``remote_bash`` for command execution.
 
         Returns ``{success, direction, src, dst, size_bytes, duration_ms}``.
         """
