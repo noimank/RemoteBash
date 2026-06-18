@@ -141,6 +141,17 @@ claude mcp add --transport http RemoteBash http://localhost:24587/mcp
 
 ### OpenCode
 
+**方式一：CLI 命令（推荐）**
+
+```bash
+opencode mcp add
+# Name 输入: RemoteBash
+# 按交互提示选择「Remote (Streaming HTTP)」
+# URL 输入: http://localhost:24587/mcp
+```
+
+**方式二：手动配置**
+
 在 `opencode.json` 中配置：
 
 ```json
@@ -154,7 +165,17 @@ claude mcp add --transport http RemoteBash http://localhost:24587/mcp
 }
 ```
 
+> `opencode.json` 可放在项目根目录（项目级）或 `~/.config/opencode/config.json`（全局）。
+
 ### Codex (OpenAI)
+
+**方式一：CLI 命令（推荐）**
+
+```bash
+codex mcp add RemoteBash --url http://localhost:24587/mcp
+```
+
+**方式二：手动配置**
 
 在 `~/.codex/config.toml` 中添加：
 
@@ -162,6 +183,8 @@ claude mcp add --transport http RemoteBash http://localhost:24587/mcp
 [mcp_servers.RemoteBash]
 url = "http://localhost:24587/mcp"
 ```
+
+> 管理命令：`codex mcp list` 列出所有服务器，`codex mcp get RemoteBash` 查看配置，`codex mcp remove RemoteBash` 移除。
 
 ### Goose
 
@@ -180,6 +203,17 @@ goose configure
 | `remote_bash` | 在远程主机执行 bash 命令，工作目录跨命令持久 |
 | `data_transfer` | SFTP 文件传输（上传/下载），支持通配符和自动展开 `~` |
 | `list_remote_clients` | 列出所有已启用的 SSH 主机 |
+
+### CLI 一键添加汇总
+
+| AI 智能体 | CLI 命令 |
+|-----------|---------|
+| Claude Code | `claude mcp add --transport http RemoteBash http://localhost:24587/mcp` |
+| OpenCode | `opencode mcp add`（交互式引导） |
+| Codex (OpenAI) | `codex mcp add RemoteBash --url http://localhost:24587/mcp` |
+| Goose | `goose configure`（交互式引导） |
+
+以上三者均支持命令行一键添加，无需手动编辑配置文件。
 
 ### 安全删除（safe_rm）
 
@@ -242,7 +276,7 @@ DELETE /api/audit                清除审计日志（支持单条 / 按主机 /
 
 - **FastMCP** 提供 MCP 协议端点 (`/mcp`)，供 AI 智能体调用
 - **FastAPI** 提供 Web 仪表盘和 REST 管理 API
-- **asyncssh** 管理与远程主机的 SSH 连接（惰性连接、空闲超时、断线重连）
+- **asyncssh** 管理与远程主机的 SSH 连接（惰性连接、断线重连、shell 按需重建）
 - **SQLite** 存储主机配置和完整命令审计日志
 
 ### 会话状态持久（常驻 PTY shell）
@@ -258,8 +292,8 @@ RemoteBash 为每个 SSH 连接维护一个**常驻的交互式 bash shell（分
 ### 连接管理
 
 - **惰性连接**：只在真正执行命令时才建立 SSH 连接
-- **空闲断开**：超过 1 小时无活动自动断开，下次使用时自动重连
 - **断线恢复**：执行期间任何网络错误都会触发断开并允许下次自动重连
+- **shell 按需重建**：PTY 进程异常退出后，下次调用自动重建
 
 ## 常见问题
 
