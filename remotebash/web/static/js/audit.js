@@ -265,8 +265,8 @@ function renderAudit(entries) {
                  data-id="${e.id}" onchange="toggleSelect(${e.id}, this.checked)"${checked} title="选择此条记录">
           ${icon}
           ${tag}
-          <span class="text-[11px] text-muted w-[160px] shrink-0">${formatTime(e.created_at)}</span>
-          <code class="text-accent text-[11px] font-mono w-[88px] shrink-0 truncate" title="${escapeHtml(e.client_name)}">${e.client_name}</code>
+          <span class="text-[11px] text-muted w-[130px] shrink-0">${formatTime(e.created_at)}</span>
+          <code class="text-accent text-[11px] font-mono shrink-0 whitespace-nowrap" title="${escapeHtml(e.client_name)}">${e.client_name}</code>
           <div class="flex items-center gap-1.5 flex-1 min-w-0">${sftpCmd}</div>
           <span class="text-[11px] text-muted w-[46px] text-right shrink-0">${e.duration_ms}ms</span>
           ${exitBadge(e.exit_code)}
@@ -282,8 +282,8 @@ function renderAudit(entries) {
         <input type="checkbox" class="audit-checkbox w-3.5 h-3.5 rounded border-border accent-accent cursor-pointer shrink-0"
                data-id="${e.id}" onchange="toggleSelect(${e.id}, this.checked)"${checked} title="选择此条记录">
         ${hasOutput ? '<span class="w-1.5 h-1.5 rounded-full bg-green shrink-0" title="output: ' + formatSize(e.output.length) + '"></span>' : ''}
-        <span class="text-[11px] text-muted w-[160px] shrink-0">${formatTime(e.created_at)}</span>
-        <code class="text-accent text-[11px] font-mono w-[88px] shrink-0 truncate" title="${escapeHtml(e.client_name)}">${e.client_name}</code>
+        <span class="text-[11px] text-muted w-[130px] shrink-0">${formatTime(e.created_at)}</span>
+        <code class="text-accent text-[11px] font-mono shrink-0 whitespace-nowrap" title="${escapeHtml(e.client_name)}">${e.client_name}</code>
         <code class="text-xs text-gray-300 font-mono truncate flex-1 min-w-0" title="${escapeHtml(e.command)}">$ ${escapeHtml(e.command)}</code>
         <span class="text-[11px] text-muted w-[46px] text-right shrink-0">${e.duration_ms}ms</span>
         ${exitBadge(e.exit_code)}
