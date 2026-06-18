@@ -36,29 +36,35 @@ logger = logging.getLogger(__name__)
 # Each invocation creates its own subdirectory under /tmp/.rbsh_trash/
 # named <epoch>_<pid> so deletions are grouped and timestamped.
 #
-# Flags are parsed and forwarded to the real rm on fallback.  ``--`` stops
-# option parsing so filenames that start with ``-`` are handled correctly.
+# Three-tier per-file strategy:
+#   1. ``mv -- $_a $_t/``           — fast, atomic, handles most cases
+#   2. ``cp -r && command rm -r``   — cross-device safe: data lands in
+#      trash BEFORE the original is removed
+#   3. ``command rm $_o -- $_a``    — last resort (only when trash is
+#      unwritable or both mv and cp fail)
 #
-# If mv fails (cross-device, permissions, ...) the function falls back to
-# the real rm with the collected flags — no command ever silently succeeds
-# without doing anything.
+# Flags are collected into ``$_o``.  When ``--`` is encountered it is
+# appended to ``$_o`` so the fallback ``command rm`` also stops option
+# parsing at the right point.
 #
-# Use ``command rm``, ``/bin/rm``, or ``\rm`` to bypass the shim.
+# Use ``command rm`` or ``/bin/rm`` to bypass the shim.
 _SAFE_RM_SHIM = (
     "rm(){"
     " _t=\"/tmp/.rbsh_trash/$(date +%s)_$$\"&&mkdir -p \"$_t\" 2>/dev/null;"
     " _o=\"\";_n=0;_e=false;_f=0;"
     " for _a;do"
     "  $_e && {"
-    "   _n=1;mv \"$_a\" \"$_t/\" 2>/dev/null||"
-    "    { command rm $_o \"$_a\"&&echo \"rm: removed $_a (trash failed)\">&2;}||_f=1;"
+    "   _n=1;mv -- \"$_a\" \"$_t/\" 2>/dev/null||"
+    "   { cp -r -- \"$_a\" \"$_t/\" 2>/dev/null&&command rm -r -- \"$_a\" 2>/dev/null;}||"
+    "   { command rm $_o -- \"$_a\" 2>/dev/null||_f=1;};"
     "   continue;"
     "  };"
     "  case \"$_a\" in"
-    "   --) _e=true;;"
+    "   --) _e=true;_o=\"$_o --\";;"
     "   -*) _o=\"$_o $_a\";;"
-    "   *) _n=1;mv \"$_a\" \"$_t/\" 2>/dev/null||"
-    "       { command rm $_o \"$_a\"&&echo \"rm: removed $_a (trash failed)\">&2;}||_f=1;"
+    "   *) _n=1;mv -- \"$_a\" \"$_t/\" 2>/dev/null||"
+    "       { cp -r -- \"$_a\" \"$_t/\" 2>/dev/null&&command rm -r -- \"$_a\" 2>/dev/null;}||"
+    "       { command rm $_o -- \"$_a\" 2>/dev/null||_f=1;};"
     "  esac;"
     " done;"
     " [ \"$_n\" -eq 0 ]&&command rm $_o 2>/dev/null;"

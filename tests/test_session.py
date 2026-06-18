@@ -3,7 +3,8 @@
 import asyncio
 import unittest
 
-from remotebash.core.session import RemoteSession
+from remotebash.core.session import RemoteSession, _SAFE_RM_SHIM
+from remotebash.core.persistent_shell import PersistentShell
 
 
 def _run(coro):
@@ -125,3 +126,112 @@ class RemoteSessionConcurrencyTest(unittest.TestCase):
         self.assertEqual(shell.peak, 1)
         # And they ran in arrival order.
         self.assertEqual(shell.started, ["cmd-a", "cmd-b"])
+
+
+class RemoteSessionSafeRmTest(unittest.TestCase):
+    """Verify that _ensure_shell() rebuilds the shell when safe_rm changes."""
+
+    def test_ensure_shell_rebuilds_when_safe_rm_toggled_on(self):
+        """Shell is rebuilt with shim when safe_rm goes False→True."""
+        session = RemoteSession(
+            name="test", host="example.invalid", port=22,
+            user="root", password="secret", safe_rm=False,
+        )
+        # Simulate a running shell without safe_rm shim.
+        old_shell = _SerialFakeShell()
+        old_shell._safe_rm = False
+        session._shell = old_shell
+        session._conn = _FakeConnected()
+
+        # Toggle safe_rm on.
+        session.safe_rm = True
+
+        # _ensure_shell should detect the mismatch and rebuild.
+        rebuild_count = 0
+        _orig_start = PersistentShell.start
+
+        async def _fake_start(self):
+            nonlocal rebuild_count
+            rebuild_count += 1
+            self._ready.set()
+            return self
+
+        PersistentShell.start = _fake_start
+        try:
+            shell = _run(session._ensure_shell())
+        finally:
+            PersistentShell.start = _orig_start
+
+        self.assertEqual(rebuild_count, 1, "shell should be rebuilt once")
+        self.assertTrue(shell._safe_rm)
+        self.assertEqual(shell._init_script, _SAFE_RM_SHIM)
+
+    def test_ensure_shell_does_not_rebuild_when_safe_rm_unchanged(self):
+        """Shell is reused when safe_rm hasn't changed."""
+        session = RemoteSession(
+            name="test", host="example.invalid", port=22,
+            user="root", password="secret", safe_rm=True,
+        )
+        old_shell = _SerialFakeShell()
+        old_shell._safe_rm = True
+        session._shell = old_shell
+        session._conn = _FakeConnected()
+
+        # safe_rm is still True — no mismatch.
+        rebuild_count = 0
+        _orig_start = PersistentShell.start
+
+        async def _fake_start(self):
+            nonlocal rebuild_count
+            rebuild_count += 1
+            self._ready.set()
+            return self
+
+        PersistentShell.start = _fake_start
+        try:
+            shell = _run(session._ensure_shell())
+        finally:
+            PersistentShell.start = _orig_start
+
+        self.assertEqual(rebuild_count, 0, "shell should NOT be rebuilt")
+        self.assertIs(shell, old_shell)
+
+    def test_ensure_shell_rebuilds_when_safe_rm_toggled_off(self):
+        """Shell is rebuilt without shim when safe_rm goes True→False."""
+        session = RemoteSession(
+            name="test", host="example.invalid", port=22,
+            user="root", password="secret", safe_rm=True,
+        )
+        old_shell = _SerialFakeShell()
+        old_shell._safe_rm = True
+        session._shell = old_shell
+        session._conn = _FakeConnected()
+
+        # Toggle safe_rm off.
+        session.safe_rm = False
+
+        rebuild_count = 0
+        _orig_start = PersistentShell.start
+
+        async def _fake_start(self):
+            nonlocal rebuild_count
+            rebuild_count += 1
+            self._ready.set()
+            return self
+
+        PersistentShell.start = _fake_start
+        try:
+            shell = _run(session._ensure_shell())
+        finally:
+            PersistentShell.start = _orig_start
+
+        self.assertEqual(rebuild_count, 1, "shell should be rebuilt once")
+        self.assertFalse(shell._safe_rm)
+        self.assertEqual(shell._init_script, "")
+
+
+class _FakeConnected:
+    """Minimal duck-type for a connected SSHClientConnection."""
+    @staticmethod
+    def is_closed():
+        return False

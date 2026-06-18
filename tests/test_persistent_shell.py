@@ -459,5 +459,57 @@ class PersistentShellResizeTest(unittest.TestCase):
         self.assertEqual(proc.resizes[-1], (120, 40))
 
 
+class PersistentShellSafeRmTest(unittest.TestCase):
+    """Verify that the safe_rm init_script is injected into the shell."""
+
+    def test_safe_rm_stores_flag(self):
+        """_safe_rm flag is stored so mismatch detection works."""
+        shell = PersistentShell(safe_rm=True)
+        self.assertTrue(shell._safe_rm)
+        shell2 = PersistentShell(safe_rm=False)
+        self.assertFalse(shell2._safe_rm)
+
+    def test_init_script_written_when_safe_rm_enabled(self):
+        """When safe_rm=True, the init_script is written to stdin during start."""
+        async def go():
+            proc = _FakeProcess()
+            shell = PersistentShell(
+                process_factory=lambda: proc,
+                safe_rm=True,
+                init_script="rm(){ echo safe; }; ",
+            )
+            start_task = asyncio.ensure_future(shell.start())
+            await asyncio.sleep(0.02)
+            _feed_done(proc, 0, "/root")
+            await start_task
+            await shell.close()
+            return proc
+        proc = _run(go())
+        written = bytes(proc.stdin.written).decode()
+        # The init_script must appear in the stdin stream (sent via builtin eval).
+        self.assertIn("rm(){ echo safe; }", written)
+
+    def test_init_script_not_written_when_safe_rm_disabled(self):
+        """When safe_rm=False, no init_script is injected."""
+        async def go():
+            proc = _FakeProcess()
+            shell = PersistentShell(
+                process_factory=lambda: proc,
+                safe_rm=False,
+                init_script="",
+            )
+            start_task = asyncio.ensure_future(shell.start())
+            await asyncio.sleep(0.02)
+            _feed_done(proc, 0, "/root")
+            await start_task
+            await shell.close()
+            return proc
+        proc = _run(go())
+        written = bytes(proc.stdin.written).decode()
+        # The init_script injection line (builtin eval '...' 2>/dev/null; true)
+        # must NOT appear.  Only the stty, init command, and framed true belong.
+        self.assertNotIn("2>/dev/null; true", written)
+
+
 if __name__ == "__main__":
     unittest.main()

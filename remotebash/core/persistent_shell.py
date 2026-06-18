@@ -202,7 +202,17 @@ class PersistentShell:
 
         # Step 3 — Optional init script (e.g. safe_rm shim). Sent while echo
         # is still OFF so the script body is never echoed to the terminal.
+        #
+        # A preceding ``unalias rm`` is sent on its own line BEFORE the
+        # shim, because bash alias expansion is a lexical pass that scans
+        # the entire input line BEFORE executing any commands on it.  If
+        # ``unalias rm`` and ``rm(){...}`` were on the same line (or
+        # inside the same ``eval`` string), the parser would expand ``rm``
+        # to ``rm -i`` before executing ``unalias``, producing
+        # ``rm -i(){...}`` — a syntax error silently swallowed by
+        # ``2>/dev/null``.
         if self._init_script:
+            await self._send_init("unalias rm 2>/dev/null")
             escaped = self._init_script.replace("'", "'\\''")
             await self._send_init(
                 f"builtin eval '{escaped}' 2>/dev/null; true"

@@ -171,17 +171,19 @@ class ConnectionManager:
 
         Each client gets at most one terminal shell, reused across WebSocket
         reconnects (so closing the terminal tab doesn't lose shell state).
-        If the shell died it is transparently restarted.
+        If the shell died or ``safe_rm`` was toggled while the terminal was
+        open it is transparently restarted so the shim takes effect.
         """
         session = self.get(name)
         shell = self._terminals.get(name)
 
-        if shell is not None and not shell.alive:
-            try:
-                await shell.close()
-            except Exception:
-                pass
-            shell = None
+        if shell is not None:
+            if not shell.alive or shell._safe_rm != session.safe_rm:
+                try:
+                    await shell.close()
+                except Exception:
+                    pass
+                shell = None
 
         if shell is None:
             shell = await session.open_terminal_shell()
