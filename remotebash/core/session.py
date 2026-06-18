@@ -69,7 +69,8 @@ _SAFE_RM_SHIM = (
 
 class RemoteSession:
 
-    def __init__(self, name, host, port, user, password, enabled=True, safe_rm=False):
+    def __init__(self, name, host, port, user, password, enabled=True,
+                 safe_rm=False, via=None):
         self.name = name
         self._host = host
         self._port = port
@@ -77,6 +78,7 @@ class RemoteSession:
         self._password = password
         self.enabled = enabled
         self.safe_rm = safe_rm
+        self._via = via                  # jump host client name, None = direct
 
         self._conn = None
         self._shell = None              # PersistentShell — lazily started
@@ -85,6 +87,7 @@ class RemoteSession:
         self._connect_lock = asyncio.Lock()  # guards connect() against TOCTOU races
         self._cwd = "~"
         self._audit_cb = None
+        self._tunnel_resolver = None     # callable: name → SSHClientConnection
 
     @property
     def connected(self):
@@ -125,17 +128,36 @@ class RemoteSession:
     def set_audit_callback(self, cb):
         self._audit_cb = cb
 
+    def set_tunnel_resolver(self, resolver):
+        """Set a callable ``name → SSHClientConnection`` for jump-host support.
+
+        Called by the manager so ``connect()`` can resolve a jump host's live
+        connection at connect time.
+        """
+        self._tunnel_resolver = resolver
+
     async def connect(self):
         if not self.enabled:
             raise RuntimeError(f"Client '{self.name}' is disabled.")
         async with self._connect_lock:
             if self.connected:
                 return
-            self._conn = await asyncssh.connect(
-                self._host, port=self._port, username=self._user,
+            kwargs: dict = dict(
+                host=self._host, port=self._port, username=self._user,
                 password=self._password, client_keys=[], known_hosts=None,
                 keepalive_interval=30, keepalive_count_max=3,
             )
+            if self._via:
+                if self._tunnel_resolver is None:
+                    raise RuntimeError(
+                        f"Client '{self.name}' requires jump host '{self._via}' "
+                        "but no tunnel resolver is configured."
+                    )
+                via_conn = await self._tunnel_resolver(self._via)
+                kwargs["tunnel"] = via_conn
+                logger.info("Connecting to %s:%d via jump host '%s'",
+                            self._host, self._port, self._via)
+            self._conn = await asyncssh.connect(**kwargs)
             self._cwd = "~"
 
     async def disconnect(self):
@@ -354,4 +376,5 @@ class RemoteSession:
             "name": self.name, "host": self._host, "port": self._port,
             "user": self._user, "connected": self.connected,
             "cwd": self._cwd, "enabled": self.enabled, "safe_rm": self.safe_rm,
+            "via": self._via,
         }

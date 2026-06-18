@@ -34,6 +34,13 @@
           <input name="password" id="editPassword" type="password" placeholder="••••"
             class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
         </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[11px] uppercase tracking-wider text-muted font-medium">透传</label>
+          <select id="editVia" name="via"
+            class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+            <option value="">(直连)</option>
+          </select>
+        </div>
       </div>
       <div class="flex justify-end gap-3 mt-6">
         <button type="button" onclick="closeEdit()"

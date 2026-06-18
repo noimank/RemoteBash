@@ -22,11 +22,14 @@ class ConnectionManager:
         cur = await self.db.execute("SELECT * FROM clients ORDER BY created_at")
         for row in await cur.fetchall():
             name = row["name"]
+            via = row["via"] if "via" in row.keys() else None
             s = RemoteSession(name=name, host=row["host"], port=row["port"],
                               user=row["user"], password=row["password"],
                               enabled=bool(row["enabled"]),
-                              safe_rm=bool(row["safe_rm"]))
+                              safe_rm=bool(row["safe_rm"]),
+                              via=via)
             s.set_audit_callback(self._on_audit)
+            s.set_tunnel_resolver(self._resolve_tunnel)
             self._sessions[name] = s
 
     async def close(self):
@@ -70,25 +73,42 @@ class ConnectionManager:
 
     # ── Clients ───────────────────────────────────────────────────
 
-    async def add(self, name, host, user, password, port=22, enabled=True, safe_rm=False):
+    async def add(self, name, host, user, password, port=22, enabled=True,
+                  safe_rm=False, via=None):
         if name in self._sessions:
             raise ValueError(f"客户端 '{name}' 已存在。")
+        if self._would_create_cycle(name, via):
+            raise ValueError(f"无法添加 '{name}'：不能将 '{via}' 设为跳板，这会产生循环引用。")
         await self.db.execute(
-            """INSERT INTO clients (name, host, port, "user", password, enabled, safe_rm)
-               VALUES (:n, :h, :p, :u, :pw, :e, :sr)""",
-            dict(n=name, h=host, p=port, u=user, pw=password, e=int(enabled), sr=int(safe_rm)),
+            """INSERT INTO clients (name, host, port, "user", password, enabled, safe_rm, via)
+               VALUES (:n, :h, :p, :u, :pw, :e, :sr, :via)""",
+            dict(n=name, h=host, p=port, u=user, pw=password, e=int(enabled),
+                 sr=int(safe_rm), via=via),
         )
         await self.db.commit()
 
         s = RemoteSession(name=name, host=host, port=port, user=user,
-                          password=password, enabled=enabled, safe_rm=safe_rm)
+                          password=password, enabled=enabled, safe_rm=safe_rm,
+                          via=via)
         s.set_audit_callback(self._on_audit)
+        s.set_tunnel_resolver(self._resolve_tunnel)
         self._sessions[name] = s
         return self._sessions[name].to_dict()
 
     async def remove(self, name):
         if name not in self._sessions:
             raise KeyError(f"客户端 '{name}' 不存在。")
+
+        # Block removal if other clients depend on this one as a jump host.
+        dependents = [n for n, s in self._sessions.items()
+                      if s._via == name]
+        if dependents:
+            raise ValueError(
+                f"无法删除 '{name}'，以下客户端依赖它作为跳板: "
+                f"{', '.join(dependents)}。"
+                f"请先删除或修改这些客户端。"
+            )
+
         await self.close_terminal(name)
         await self._sessions.pop(name).disconnect()
         await self.db.execute("DELETE FROM clients WHERE name=?", (name,))
@@ -98,9 +118,14 @@ class ConnectionManager:
         if name not in self._sessions:
             raise KeyError(f"客户端 '{name}' 不存在。")
 
-        # Persist to DB first — on failure the in-memory state is unchanged.
-        allowed = {"host", "port", "user", "password", "enabled", "safe_rm"}
+        # Validate before persisting.
+        allowed = {"host", "port", "user", "password", "enabled", "safe_rm", "via"}
         updates = {k: v for k, v in fields.items() if k in allowed}
+        if "via" in updates and self._would_create_cycle(name, updates["via"]):
+            raise ValueError(
+                f"无法更新 '{name}'：不能将 '{updates['via']}' 设为跳板，"
+                f"这会产生循环引用。"
+            )
         if updates:
             updates["name"] = name
             cols = ", ".join(f"{k}=:{k}" for k in updates)
@@ -124,6 +149,8 @@ class ConnectionManager:
             s.user = fields["user"]
         if "password" in fields:
             s.password = fields["password"]
+        if "via" in fields:
+            s._via = fields["via"]
 
         return self._sessions[name].to_dict()
 
@@ -249,3 +276,42 @@ class ConnectionManager:
         return cur.rowcount
 
     # ── Internal ──────────────────────────────────────────────────
+
+    async def _resolve_tunnel(self, name: str):
+        """Resolve a tunnel connection for jump-host chaining.
+
+        Returns the live ``SSHClientConnection`` for *name*, connecting it
+        lazily if needed.  Ignores the ``enabled`` flag — the tunnel is
+        infrastructure plumbing, not a user-facing endpoint.  ``enabled``
+        only controls whether the host appears in ``list_remote_clients``
+        and accepts direct commands.
+        """
+        import asyncssh
+
+        session = self.get(name)
+        async with session._connect_lock:
+            if not session.connected:
+                session._conn = await asyncssh.connect(
+                    session._host, port=session._port, username=session._user,
+                    password=session._password, client_keys=[], known_hosts=None,
+                    keepalive_interval=30, keepalive_count_max=3,
+                )
+                session._cwd = "~"
+        return session._conn
+
+    def _would_create_cycle(self, name: str, via: str | None) -> bool:
+        """Return True if setting *name*'s jump host to *via* creates a cycle.
+
+        Only guards against single-hop loops: self-reference (A via A) and
+        mutual pairs (A via B while B via A).  Deeper chains are not
+        currently supported so they don't need to be checked.
+        """
+        if via is None:
+            return False
+        if via == name:
+            return True  # self-reference
+        # Check for mutual pair: A via B and B via A
+        via_session = self._sessions.get(via)
+        if via_session is not None and via_session._via == name:
+            return True
+        return False

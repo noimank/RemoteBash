@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS clients (
     port        INTEGER NOT NULL DEFAULT 22,
     "user"      TEXT NOT NULL,
     password    TEXT NOT NULL,
+    via         TEXT DEFAULT NULL,
     safe_rm     INTEGER NOT NULL DEFAULT 0,
     enabled     INTEGER NOT NULL DEFAULT 1,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),

@@ -37,13 +37,14 @@ async def add_client(request: Request):
 
     enabled = body.get("enabled", True)
     safe_rm = body.get("safe_rm", False)
+    via = body.get("via") or None
     auto_connect = body.get("auto_connect", True)
     port = int(body.get("port", 22))
 
     mgr = _mgr(request)
     try:
         info = await mgr.add(name=name, host=host, user=user, password=password,
-                             port=port, enabled=enabled, safe_rm=safe_rm)
+                             port=port, enabled=enabled, safe_rm=safe_rm, via=via)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=409)
 
@@ -64,6 +65,8 @@ async def remove_client(client_name: str, request: Request):
         return {"ok": True}
     except KeyError:
         return JSONResponse({"error": f"客户端 '{client_name}' 不存在"}, status_code=404)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
 
 
 @router.post("/clients/{client_name}/connect")
@@ -143,6 +146,8 @@ async def update_client(client_name: str, request: Request):
         return await _mgr(request).update(client_name, **body)
     except KeyError:
         return JSONResponse({"error": f"客户端 '{client_name}' 不存在"}, status_code=404)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
 
 
 # ═══════════════════════════════════════════════════════════════════════
