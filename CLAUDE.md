@@ -48,7 +48,7 @@ Commands run on a **single long-lived interactive bash shell with an allocated P
 - `feed_raw` + `attach_tap` provide a raw byte pass-through path for the in-browser terminal (colours preserved, xterm.js renders).
 - Command timeout cancels the pending run and hard-closes the shell; the next `_ensure_shell()` rebuilds it.
 
-`RemoteSession._ensure_shell()` lazily starts the shell on first use and tears it down on idle timeout or if the process died. An `asyncio.Lock` serialises concurrent `exec()` callers so two simultaneous invocations cannot create duplicate shells. `exec()` is a thin wrapper over `shell.run()`. The optional `safe_rm` shim is injected at shell start via the `init_script` constructor arg (defined in `session.py` to avoid a circular import).
+`RemoteSession._ensure_shell()` lazily starts the shell on first use and rebuilds it if the process died. An `asyncio.Lock` serialises concurrent `exec()` callers so two simultaneous invocations cannot create duplicate shells. `exec()` is a thin wrapper over `shell.run()`. The optional `safe_rm` shim is injected at shell start via the `init_script` constructor arg (defined in `session.py` to avoid a circular import).
 
 ### Browser terminal (`remotebash/api/ws.py`)
 
@@ -57,10 +57,9 @@ A WebSocket at `/api/clients/{name}/terminal` bridges xterm.js to a separate `Pe
 ### Connection lifecycle (`remotebash/core/session.py`, `remotebash/core/manager.py`)
 
 - **Lazy connect** — `exec()` calls `connect()` only when the session is not already connected.
-- **Idle timeout** — if `time.monotonic() - last_activity > 3600` seconds, the session disconnects before reconnecting transparently.
 - **Keepalive** — asyncssh is configured with `keepalive_interval=30, keepalive_count_max=3`.
 - **Error recovery** — any `asyncssh.Error`, `OSError`, or `TimeoutError` during execution triggers an immediate disconnect; the next call will reconnect.
-- **`test_connection()`** creates a fresh independent connection (10s timeout) to verify credentials without touching the existing session.
+- **`test_connection()`** — calls `connect()` (same path as real usage, including jump-host relay), leaving the connection alive.
 
 ### Database (`remotebash/core/database.py`)
 
@@ -72,7 +71,7 @@ The `open_db()` function creates parent directories if needed and runs schema mi
 
 ### Manager (`remotebash/core/manager.py`)
 
-Holds an in-memory `dict[str, RemoteSession]` synchronized with the DB, plus a `dict[str, PersistentShell]` of browser-terminal shells (`_terminals`). `load()` reconstructs sessions from `clients` rows. Audit callbacks are registered per-session and write to `audit_log` on every command. `get_or_create_terminal(name)` returns (and lazily starts) the terminal shell for a client; idle terminal shells are torn down on next access (same 3600s policy as the MCP path). `close_terminal(name)` / `close()` tear them down. `update()` persists to the DB first, then updates in-memory state on success (so a DB failure leaves memory unchanged). Allowed update fields: `{host, port, user, password, enabled, safe_rm}`.
+Holds an in-memory `dict[str, RemoteSession]` synchronized with the DB, plus a `dict[str, PersistentShell]` of browser-terminal shells (`_terminals`). `load()` reconstructs sessions from `clients` rows. Audit callbacks are registered per-session and write to `audit_log` on every command. `get_or_create_terminal(name)` returns (and lazily starts) the terminal shell for a client; closed terminal shells are rebuilt on next access. `close_terminal(name)` / `close()` tear them down. `update()` persists to the DB first, then updates in-memory state on success (so a DB failure leaves memory unchanged). Allowed update fields: `{host, port, user, password, enabled, safe_rm}`.
 
 ### MCP tools (`remotebash/api/tools.py`)
 
