@@ -94,6 +94,7 @@ class RemoteSession:
         self._cwd = "~"
         self._audit_cb = None
         self._tunnel_resolver = None     # callable: name → SSHClientConnection
+        self._relay = None               # SocatTunnelRelay when tunnel fallback used
 
     @property
     def connected(self):
@@ -160,10 +161,52 @@ class RemoteSession:
                         "but no tunnel resolver is configured."
                     )
                 via_conn = await self._tunnel_resolver(self._via)
-                kwargs["tunnel"] = via_conn
                 logger.info("Connecting to %s:%d via jump host '%s'",
                             self._host, self._port, self._via)
-            self._conn = await asyncssh.connect(**kwargs)
+
+                try:
+                    kwargs["tunnel"] = via_conn
+                    self._conn = await asyncssh.connect(**kwargs)
+                except asyncssh.ChannelOpenError as exc:
+                    # code 1 = SSH_OPEN_ADMINISTRATIVELY_PROHIBITED.
+                    # The jump host has AllowTcpForwarding no — fall back
+                    # to a socat/nc relay through the jump host's shell.
+                    if exc.code != 1:
+                        raise
+                    logger.warning(
+                        "Jump host '%s' prohibits TCP forwarding "
+                        "(AllowTcpForwarding no). "
+                        "Falling back to relay for %s:%d.",
+                        self._via, self._host, self._port)
+                    from .tunnel_relay import (  # noqa: E402
+                        SocatTunnelRelay,
+                        TunnelRelayError,
+                    )
+                    try:
+                        relay = SocatTunnelRelay(
+                            via_conn, self._host, self._port)
+                        sock = await relay.connect()
+                    except TunnelRelayError:
+                        raise RuntimeError(
+                            f"Jump host '{self._via}' prohibits TCP "
+                            f"forwarding and no relay tool (socat, nc, "
+                            f"ncat, python3) is available on the jump host."
+                        ) from None
+                    self._relay = relay
+                    del kwargs["tunnel"]
+                    kwargs["sock"] = sock
+                    try:
+                        self._conn = await asyncssh.connect(**kwargs)
+                    except Exception:
+                        # Relay is established but inner connect failed —
+                        # clean up so the relay isn't leaked.
+                        await asyncio.wait_for(relay.close(), timeout=5)
+                        self._relay = None
+                        raise
+                    logger.info("Connected to %s:%d via socat relay on '%s'",
+                                self._host, self._port, self._via)
+            else:
+                self._conn = await asyncssh.connect(**kwargs)
             self._cwd = "~"
 
     async def disconnect(self):
@@ -179,6 +222,13 @@ class RemoteSession:
             try:
                 conn.close()
                 await asyncio.wait_for(conn.wait_closed(), timeout=5)
+            except Exception:
+                pass
+        if self._relay:
+            relay = self._relay
+            self._relay = None
+            try:
+                await asyncio.wait_for(relay.close(), timeout=5)
             except Exception:
                 pass
 
@@ -257,13 +307,13 @@ class RemoteSession:
         }
 
     async def test_connection(self):
-        conn = await asyncssh.connect(
-            self._host, port=self._port, username=self._user,
-            password=self._password, client_keys=[], known_hosts=None,
-            connect_timeout=3,
-        )
-        conn.close()
-        await conn.wait_closed()
+        """Test connectivity using the same path as :meth:`connect`.
+
+        If already connected this is a no-op.  Otherwise a full connect
+        is performed (including jump-host tunnel and relay fallback) and
+        the connection is kept alive for subsequent use.
+        """
+        await self.connect()
 
     async def _ensure_shell(self) -> PersistentShell:
         """Return a live PersistentShell, (re)starting it if needed.
