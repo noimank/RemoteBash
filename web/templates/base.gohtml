@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="scroll-smooth">
+<head>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230f1117'/><text x='50%25' y='53%25' dominant-baseline='middle' text-anchor='middle' font-family='monospace' font-size='18' font-weight='bold' fill='%2358a6ff'>▶</text></svg>"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>RemoteBash{{if eq .ActivePage "dashboard"}} · Dashboard{{else if eq .ActivePage "audit"}} · 审计日志{{end}}</title>
+  <script src="/static/js/vendor/tailwind.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            surface: { DEFAULT: '#0f1117', raised: '#1a1d27', overlay: '#222533' },
+            border: { DEFAULT: '#2a2d3a', hover: '#3a3d4a' },
+            accent: { DEFAULT: '#58a6ff', hover: '#4090e0' },
+            muted: '#8b949e',
+            green: '#3fb950',
+            red: '#f85149',
+            yellow: '#d2991d',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    input[type="datetime-local"] { color-scheme: dark; }
+    input[type="datetime-local"]::-webkit-datetime-edit-text,
+    input[type="datetime-local"]::-webkit-datetime-edit-month-field,
+    input[type="datetime-local"]::-webkit-datetime-edit-day-field,
+    input[type="datetime-local"]::-webkit-datetime-edit-year-field,
+    input[type="datetime-local"]::-webkit-datetime-edit-hour-field,
+    input[type="datetime-local"]::-webkit-datetime-edit-minute-field { color: #8b949e; }
+    input[type="datetime-local"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
+    input[type="datetime-local"]::-webkit-datetime-edit-fields-wrapper { color: #e2e8f0; }
+  </style>
+  {{if eq .ActivePage "dashboard"}}
+  <link rel="stylesheet" href="/static/css/xterm.css">
+  {{end}}
+</head>
+<body class="bg-surface text-gray-200 min-h-screen font-sans antialiased">
+  <header class="border-b border-border">
+    <div class="max-w-6xl mx-auto px-6 py-5 flex items-center gap-3">
+      <span class="text-2xl">&#9881;</span>
+      <h1 class="text-xl font-semibold tracking-tight">RemoteBash</h1>
+      <span class="text-muted text-sm">远程连接管理</span>
+      <nav class="ml-6 flex gap-1">
+        <a href="/" class="rounded-lg px-3 py-1.5 text-sm transition-colors hover:bg-surface-overlay {{if eq .ActivePage "dashboard"}}bg-surface-overlay text-white{{else}}text-muted{{end}}">连接列表</a>
+        <a href="/audit" class="rounded-lg px-3 py-1.5 text-sm transition-colors hover:bg-surface-overlay {{if eq .ActivePage "audit"}}bg-surface-overlay text-white{{else}}text-muted{{end}}">审计日志</a>
+      </nav>
+      <span class="ml-auto text-xs text-muted hidden sm:inline">v2.0.0</span>
+    </div>
+  </header>
+
+  {{if eq .ActivePage "dashboard"}}
+    <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+    {{template "add_form" .}}
+    {{template "client_list" .}}
+    </main>
+    {{template "edit_modal" .}}
+    {{template "terminal_modal" .}}
+    <script src="/static/js/vendor/xterm.js"></script>
+    <script src="/static/js/vendor/xterm-addon-fit.js"></script>
+    <script src="/static/js/app.js?v=2.0.0"></script>
+    <script src="/static/js/terminal.js"></script>
+  {{else if eq .ActivePage "audit"}}
+    {{template "audit_page" .}}
+    <script src="/static/js/audit.js"></script>
+  {{end}}
+
+  <div id="toast" class="fixed top-5 right-5 z-50 bg-surface-overlay border border-border rounded-xl px-5 py-3 text-sm shadow-2xl opacity-0 translate-y-2 transition-all duration-300 pointer-events-none"></div>
+</body>
+</html>

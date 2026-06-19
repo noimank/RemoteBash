@@ -1,0 +1,54 @@
+{{define "edit_modal"}}
+<div id="editModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 opacity-0 pointer-events-none transition-opacity duration-200">
+  <div class="bg-surface-raised border border-border rounded-2xl w-full max-w-md mx-4 shadow-2xl transform scale-95 transition-transform duration-200" id="editModalInner">
+    <form id="editForm" class="p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h2 class="text-base font-semibold">编辑连接信息</h2>
+        <button type="button" onclick="closeEdit()" class="text-muted hover:text-white transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="space-y-4">
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[11px] uppercase tracking-wider text-muted font-medium">名称</label>
+          <input type="text" id="editName" disabled
+            class="rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-500 cursor-not-allowed">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[11px] uppercase tracking-wider text-muted font-medium">主机</label>
+          <input name="host" id="editHost" placeholder="10.0.1.50" required
+            class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[11px] uppercase tracking-wider text-muted font-medium">端口</label>
+          <input name="port" id="editPort" value="22"
+            class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[11px] uppercase tracking-wider text-muted font-medium">用户</label>
+          <input name="user" id="editUser" placeholder="root" required
+            class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[11px] uppercase tracking-wider text-muted font-medium">密码 <span class="text-xs text-muted">（留空则不修改）</span></label>
+          <input name="password" id="editPassword" type="password" placeholder="••••"
+            class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label class="text-[11px] uppercase tracking-wider text-muted font-medium">透传</label>
+          <select id="editVia" name="via"
+            class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+            <option value="">(直连)</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button type="button" onclick="closeEdit()"
+          class="rounded-lg border border-border text-muted hover:text-white text-sm px-4 py-2 transition-colors font-medium">取消</button>
+        <button type="submit"
+          class="rounded-lg bg-accent hover:bg-accent-hover text-white font-medium text-sm px-4 py-2 transition-colors">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+{{end}}

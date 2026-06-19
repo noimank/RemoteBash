@@ -1,0 +1,47 @@
+{{define "add_form"}}
+<section class="bg-surface-raised border border-border rounded-2xl p-6">
+  <h2 class="text-base font-semibold mb-5 flex items-center gap-2">
+    <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+    添加连接
+  </h2>
+  <form id="addForm" class="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-8 gap-3 items-end">
+    <div class="flex flex-col gap-1.5">
+      <label class="text-[11px] uppercase tracking-wider text-muted font-medium">名称 <span class="text-red">*</span></label>
+      <input name="name" placeholder="生产服务器" required
+        class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+    </div>
+    <div class="flex flex-col gap-1.5 lg:col-span-2">
+      <label class="text-[11px] uppercase tracking-wider text-muted font-medium">主机 <span class="text-red">*</span></label>
+      <input name="host" placeholder="10.0.1.50" required
+        class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-[11px] uppercase tracking-wider text-muted font-medium">端口</label>
+      <input name="port" value="22"
+        class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-[11px] uppercase tracking-wider text-muted font-medium">用户 <span class="text-red">*</span></label>
+      <input name="user" placeholder="root" required
+        class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-[11px] uppercase tracking-wider text-muted font-medium">密码 <span class="text-red">*</span></label>
+      <input name="password" type="password" placeholder="••••" required
+        class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+    </div>
+    <div class="flex flex-col gap-1.5">
+      <label class="text-[11px] uppercase tracking-wider text-muted font-medium">透传</label>
+      <select id="via" name="via"
+        class="w-full rounded-lg bg-surface border border-border px-3 py-2 text-sm font-mono text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent transition">
+        <option value="">(直连)</option>
+      </select>
+    </div>
+    <button type="submit"
+      class="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium text-sm py-2.5 px-4 transition-colors whitespace-nowrap">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
+      添加
+    </button>
+  </form>
+</section>
+{{end}}

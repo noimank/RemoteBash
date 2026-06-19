@@ -1,11 +1,16 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+# Binaries
+/remotebash
+/remotebash.exe
 
-# Virtual environments
-.venv
-.idea
+# IDE
+.idea/
+.vscode/
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+
+# OS
+.DS_Store
+Thumbs.db
