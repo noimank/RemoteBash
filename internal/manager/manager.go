@@ -170,25 +170,40 @@ func (m *ConnectionManager) Add(name, host, user, password, via string, port int
 // Remove deletes a client and its session.
 func (m *ConnectionManager) Remove(name string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	_, exists := m.sessions[name]
 	if !exists {
+		m.mu.Unlock()
 		return fmt.Errorf("客户端 '%s' 不存在。", name)
 	}
 
 	deps := m.dependents(name)
 	if len(deps) > 0 {
+		m.mu.Unlock()
 		return fmt.Errorf(
 			"无法删除 '%s'，以下客户端依赖它作为跳板: %s。请先删除或修改这些客户端。",
 			name, joinNames(deps))
 	}
 
+	// Snapshot the session and release manager lock before acquiring execLock.
+	// This avoids a deadlock: Remove holds m.mu, Exec holds execLock then calls
+	// m.mu.RLock via Get() during audit callback (the resolver path is safe,
+	// but defensive ordering is still correct).
+	s := m.sessions[name]
 	m.closeTerminalLocked(name)
-	if s, ok := m.sessions[name]; ok {
-		s.Disconnect()
-	}
 	delete(m.sessions, name)
+	m.mu.Unlock()
+
+	// Wait for in-flight Exec() to finish, then tear down the connection.
+	s.ExecLock()
+	s.Disconnect()
+	s.ExecUnlock()
+
+	// Clean up audit log entries before deleting the client to avoid FK
+	// constraint violations (audit_log.client_name REFERENCES clients(name)).
+	if _, err := database.DeleteAuditByClient(m.db, name); err != nil {
+		slog.Warn("删除客户端审计日志失败", "client", name, "err", err)
+	}
 
 	if err := database.DeleteClient(m.db, name); err != nil {
 		return fmt.Errorf("delete client from db: %w", err)
