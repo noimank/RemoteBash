@@ -89,6 +89,9 @@ func (b *MCPBridge) registerTools() {
 			return mcpError("invalid arguments: expected object"), nil
 		}
 		clientName := getString(args, "client_name")
+		if clientName == "" {
+			return mcpError("缺少必填参数 client_name。请使用 list_remote_clients 获取可用的远程主机名称。"), nil
+		}
 		command := getString(args, "command")
 		timeout := getInt(args, "timeout", 30)
 
@@ -180,6 +183,9 @@ func (b *MCPBridge) registerTools() {
 			return mcpError("invalid arguments: expected object"), nil
 		}
 		clientName := getString(args, "client_name")
+		if clientName == "" {
+			return mcpError("缺少必填参数 client_name。请使用 list_remote_clients 获取可用的远程主机名称。"), nil
+		}
 		src := getString(args, "src")
 		dst := getString(args, "dst")
 		direction := getString(args, "direction", "local2remote")
