@@ -5,10 +5,9 @@ services:
     ports:
       - "24587:24587"
     volumes:
-      - remotebash-data:/data
+      - ./remotebash-data:/data
     restart: unless-stopped
     # 如需调试日志，取消下面注释：
     # command: ["--host", "0.0.0.0", "--port", "24587", "--db", "/data/remotebash.db", "--debug"]
 
-volumes:
-  remotebash-data:
+
