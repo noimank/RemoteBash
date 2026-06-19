@@ -2,6 +2,9 @@
 /remotebash
 /remotebash.exe
 
+# Build output
+/build/
+
 # IDE
 .idea/
 .vscode/

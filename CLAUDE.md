@@ -11,6 +11,13 @@ go build -o remotebash ./cmd/remotebash/
 # Build with stripped debug info (smaller binary)
 go build -ldflags="-s -w" -o remotebash ./cmd/remotebash/
 
+# Cross-compile for all platforms (output to build/)
+./scripts/build.sh              # Linux/macOS
+.\scripts\build.ps1             # Windows PowerShell
+
+# Cross-compile specific platforms only
+./scripts/build.sh dev build "linux/amd64,windows/amd64"
+
 # Run the server (HTTP transport — dashboard + MCP on same port)
 ./remotebash --port 24587
 
