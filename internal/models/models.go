@@ -27,6 +27,7 @@ type ClientInfo struct {
 	Enabled   bool   `json:"enabled"`
 	SafeRm    bool   `json:"safe_rm"`
 	Via       string `json:"via,omitempty"`
+	ShellType string `json:"shell_type"`
 }
 
 // RemoteClientInfo is the MCP list_remote_clients response shape.
@@ -38,6 +39,7 @@ type RemoteClientInfo struct {
 	User       string `json:"user"`
 	Cwd        string `json:"cwd"`
 	SafeRm     bool   `json:"safe_rm"`
+	ShellType  string `json:"shell_type"`
 }
 
 // ClientRequest is the JSON body for adding/updating a client.
@@ -110,7 +112,7 @@ type TransferResult struct {
 	DurationMs int    `json:"duration_ms"`
 }
 
-// MCPRemoteBashOutput is the MCP remote_bash tool return shape.
+// MCPRemoteBashOutput is the MCP remote_shell tool return shape.
 type MCPRemoteBashOutput struct {
 	Output   string `json:"output"`
 	ExitCode int    `json:"exit_code"`

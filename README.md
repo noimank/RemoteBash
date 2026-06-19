@@ -169,7 +169,7 @@ goose configure
 
 | 工具 | 说明 |
 |------|------|
-| `remote_bash` | 在远程主机执行 bash 命令，工作目录跨命令持久 |
+| `remote_shell` | 在远程主机执行 shell 命令，工作目录跨命令持久 |
 | `data_transfer` | SFTP 文件传输（上传/下载），自动展开 `~` |
 | `list_remote_clients` | 列出所有已启用的 SSH 主机 |
 

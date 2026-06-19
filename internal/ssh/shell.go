@@ -78,6 +78,7 @@ type PersistentShell struct {
 	safeRm         bool
 	initScript     string
 	promptTemplate string
+	shellType      string // detected at startup: ash, bash, dash, zsh, etc.
 
 	mu      sync.Mutex
 	buf     []byte
@@ -203,7 +204,7 @@ func (s *PersistentShell) Start() error {
 			return fmt.Errorf("unalias rm: %w", err)
 		}
 		escaped := strings.ReplaceAll(s.initScript, "'", "'\\''")
-		if err := s.sendInit("builtin eval '"+escaped+"' 2>/dev/null; true"); err != nil {
+		if err := s.sendInit("eval '"+escaped+"' 2>/dev/null; true"); err != nil {
 			s.Close()
 			return fmt.Errorf("init script: %w", err)
 		}
@@ -217,12 +218,13 @@ func (s *PersistentShell) Start() error {
 		}
 	}
 
-	// MCP path: verify framing works.
+	// MCP path: verify framing works, then detect remote shell type.
 	if s.promptTemplate == "" {
 		if _, err := s.Run("true", 15*time.Second); err != nil {
 			s.Close()
 			return fmt.Errorf("shell framing verification failed: %w", err)
 		}
+		s.detectShellType()
 		s.mu.Lock()
 		close(s.ready.done)
 		s.mu.Unlock()
@@ -448,7 +450,7 @@ func (s *PersistentShell) waitForResult(command, token string, timeout time.Dura
 		s.Close()
 
 		detail := fmt.Sprintf(
-			"Command timed out after %v.\nremote_bash cannot answer interactive prompts. "+
+			"Command timed out after %v.\nremote_shell cannot answer interactive prompts. "+
 				"The command may be waiting for input; retry with non-interactive flags or "+
 				"include the required input in the command.\n"+
 				"The remote shell session was reset.", timeout.Round(time.Second))
@@ -524,6 +526,29 @@ func (s *PersistentShell) SafeRmFlag() bool {
 	return s.safeRm
 }
 
+// ShellType returns the detected remote shell name (e.g. "ash", "bash", "dash", "zsh").
+// Empty string means not yet detected. Only populated for the MCP path.
+func (s *PersistentShell) ShellType() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.shellType
+}
+
+// detectShellType runs a lightweight POSIX command to identify the remote shell.
+// Must only be called during Start(), on the MCP path (promptTemplate == "").
+func (s *PersistentShell) detectShellType() {
+	// Pure shell parameter expansion — no external binaries needed.
+	// Strips leading '-' (login shell marker) and leading path (e.g. /bin/ →).
+	detectCmd := `_o=$0; _o=${_o#-}; echo "${_o##*/}"`
+	result, err := s.Run(detectCmd, 5*time.Second)
+	if err != nil {
+		slog.Warn("shell类型检测失败", "err", err)
+		return
+	}
+	s.shellType = strings.TrimSpace(result.Output)
+	slog.Info("检测到远程shell类型", "type", s.shellType)
+}
+
 // Close tears down the shell.
 func (s *PersistentShell) Close() {
 	s.mu.Lock()
@@ -556,14 +581,14 @@ func (s *PersistentShell) buildPayload(command, token string) []byte {
 	quoted := bashQuote(command)
 	payload := fmt.Sprintf(
 		"__rbsh_opts=$-; "+
-			"case $__rbsh_opts in *e*) builtin set +e; __rbsh_restore_e=1;; *) __rbsh_restore_e=0;; esac; "+
+			"case $__rbsh_opts in *e*) set +e; __rbsh_restore_e=1;; *) __rbsh_restore_e=0;; esac; "+
 			"__rbsh_cmd=%s; "+
-			"builtin printf '%s:%s__\\n'; "+
-			"builtin eval \"$__rbsh_cmd\"; "+
+			"printf '%s:%s__\\n'; "+
+			"eval \"$__rbsh_cmd\"; "+
 			"__rbsh_ec=$?; "+
-			"builtin printf '%s:%s:%%s:CWD:%%s__\\n' \"$__rbsh_ec\" \"$PWD\"; "+
-			"[ \"$__rbsh_restore_e\" = 1 ] && builtin set -e; "+
-			"builtin unset __rbsh_cmd __rbsh_ec __rbsh_opts __rbsh_restore_e\n",
+			"printf '%s:%s:%%s:CWD:%%s__\\n' \"$__rbsh_ec\" \"$PWD\"; "+
+			"[ \"$__rbsh_restore_e\" = 1 ] && set -e; "+
+			"unset __rbsh_cmd __rbsh_ec __rbsh_opts __rbsh_restore_e\n",
 		quoted, startPrefix, token, donePrefix, token,
 	)
 	return []byte(payload)

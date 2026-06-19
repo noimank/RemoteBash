@@ -106,7 +106,7 @@ Holds a `map[string]*RemoteSession` synchronised with the DB, plus a `map[string
 ### MCP tools (`internal/mcp/server.go`)
 
 Three tools registered via `mcp-go`:
-- `remote_bash(client_name, command, timeout=30)` — returns `{output, exit_code, cwd}`.
+- `remote_shell(client_name, command, timeout=30)` — returns `{output, exit_code, cwd}`.
 - `list_remote_clients()` — returns only enabled clients with `{client_name, host, port, user, cwd, safe_rm}`.
 - `data_transfer(client_name, src, dst, direction="local2remote")` — SFTP file transfer.
 

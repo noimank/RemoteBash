@@ -56,11 +56,11 @@ func (b *MCPBridge) HTTPHandler(transport string) http.Handler {
 }
 
 func (b *MCPBridge) registerTools() {
-	// ── remote_bash ──────────────────────────────────────────
-	toolRB := mcp.NewTool("remote_bash",
+	// ── remote_shell ──────────────────────────────────────────
+	toolRB := mcp.NewTool("remote_shell",
 		mcp.WithDescription(
-			"Execute a bash command on a remote host. "+
-				"Runs against a long-lived, PTY-backed interactive bash shell per host, "+
+			"Execute a shell command on a remote host. "+
+				"Runs against a long-lived, PTY-backed interactive shell per host, "+
 				"so working directory, environment, shell functions, aliases, and history "+
 				"persist across calls. Commands must be non-interactive — prompts that wait "+
 				"for input (rm -i, password prompts, top, vim) block until timeout and then "+
@@ -73,7 +73,7 @@ func (b *MCPBridge) registerTools() {
 		),
 		mcp.WithString("command",
 			mcp.Required(),
-			mcp.Description("Bash command to execute. Runs in a persistent interactive shell, "+
+			mcp.Description("Shell command to execute. Runs in a persistent interactive shell, "+
 				"so pipes, redirects, builtins, aliases, functions, and the current working "+
 				"directory behave as in a real terminal."),
 		),
@@ -115,7 +115,8 @@ func (b *MCPBridge) registerTools() {
 	toolList := mcp.NewTool("list_remote_clients",
 		mcp.WithDescription(
 			"List all enabled remote hosts. "+
-				"Returns [{client_name, host, port, user, cwd, safe_rm}, ...]. "+
+				"Returns [{client_name, host, port, user, cwd, safe_rm, shell_type}, ...]. "+
+				"shell_type is the detected remote shell (e.g. ash, bash, dash, zsh). "+
 				"Raises an error if no hosts are configured yet."),
 	)
 
@@ -141,6 +142,7 @@ func (b *MCPBridge) registerTools() {
 				User:       c.User,
 				Cwd:        c.Cwd,
 				SafeRm:     c.SafeRm,
+				ShellType:  c.ShellType,
 			})
 		}
 		return mcpResult(info)
@@ -150,7 +152,7 @@ func (b *MCPBridge) registerTools() {
 	toolDT := mcp.NewTool("data_transfer",
 		mcp.WithDescription(
 			"Transfer files between this server and a remote host via SFTP. "+
-				"Use remote_bash for command execution. "+
+				"Use remote_shell for command execution. "+
 				"Returns {success, direction, src, dst, size_bytes, duration_ms}."),
 		mcp.WithString("client_name",
 			mcp.Required(),

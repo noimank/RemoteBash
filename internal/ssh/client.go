@@ -31,6 +31,7 @@ type RemoteSession struct {
 
 	conn            *gossh.Client
 	shell           *PersistentShell // MCP exec shell
+	shellType       string           // detected remote shell (ash, bash, ...)
 	shellLock       sync.Mutex       // guards EnsureShell
 	execLock        sync.Mutex       // serialises concurrent Exec callers
 	connectLock     sync.Mutex       // guards Connect against TOCTOU races
@@ -176,6 +177,7 @@ func (s *RemoteSession) Disconnect() {
 		s.shell.Close()
 		s.shell = nil
 	}
+	s.shellType = ""
 	s.shellLock.Unlock()
 
 	if s.conn != nil {
@@ -216,6 +218,7 @@ func (s *RemoteSession) EnsureShell() (*PersistentShell, error) {
 	}
 
 	s.shell = shell
+	s.shellType = shell.ShellType()
 	s.cwd = "~"
 	return s.shell, nil
 }
@@ -410,6 +413,7 @@ func (s *RemoteSession) ToInfo() models.ClientInfo {
 		Enabled:   s.Enabled,
 		SafeRm:    s.SafeRm,
 		Via:       s.Via,
+		ShellType: s.shellType,
 	}
 }
 
