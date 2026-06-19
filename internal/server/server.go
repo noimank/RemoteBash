@@ -51,6 +51,10 @@ func New(cfg *config.ServerConfig) (*Server, error) {
 		return nil, fmt.Errorf("load clients: %w", err)
 	}
 
+	// Kick off async connection warm-up so shellType is populated for
+	// list_remote_clients without waiting for a first command.
+	mgr.WarmUp()
+
 	tmpl, err := web.ParseTemplates()
 	if err != nil {
 		db.Close()

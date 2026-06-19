@@ -50,6 +50,41 @@ func (m *ConnectionManager) Load() error {
 	return nil
 }
 
+// WarmUp asynchronously connects all enabled clients and starts their shells.
+// This populates shellType (via detectShellType) and cwd on each session so
+// list_remote_clients returns complete host metadata without waiting for a
+// first command. Failed hosts are logged and skipped — the lazy-connect path
+// in Exec() still retries on next use.
+func (m *ConnectionManager) WarmUp() {
+	m.mu.RLock()
+	sessions := make([]*ssh.RemoteSession, 0)
+	for _, s := range m.sessions {
+		if s.Enabled {
+			sessions = append(sessions, s)
+		}
+	}
+	m.mu.RUnlock()
+
+	if len(sessions) == 0 {
+		return
+	}
+
+	slog.Info("开始异步预热客户端", "count", len(sessions))
+	for _, s := range sessions {
+		go func(sess *ssh.RemoteSession) {
+			if err := sess.Connect(); err != nil {
+				slog.Warn("预热连接失败", "client", sess.Name, "err", err)
+				return
+			}
+			if _, err := sess.EnsureShell(); err != nil {
+				slog.Warn("预热shell失败", "client", sess.Name, "err", err)
+				return
+			}
+			slog.Info("客户端预热完成", "client", sess.Name, "shell_type", sess.ToInfo().ShellType)
+		}(s)
+	}
+}
+
 // Close disconnects all sessions and terminal shells.
 // Acquires execLock on each session to avoid racing in-flight Exec calls.
 func (m *ConnectionManager) Close() {
