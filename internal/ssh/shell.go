@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -289,8 +290,10 @@ func (s *PersistentShell) readerLoop() {
 			s.mu.Unlock()
 		}
 		if err != nil {
-			if err != io.EOF || n == 0 {
-				slog.Warn("读取循环已结束", "err", err)
+			if errors.Is(err, io.EOF) {
+				slog.Debug("读取循环已结束", "err", err)
+			} else {
+				slog.Warn("读取循环异常结束", "err", err)
 			}
 			break
 		}
