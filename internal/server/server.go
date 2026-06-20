@@ -171,6 +171,12 @@ func (s *Server) Run() error {
 		}
 	}()
 
+	// Ready: surface actionable URLs so the operator knows where to point the
+	// browser and the MCP client without digging through the config.
+	dashboard := s.cfg.DashboardURL()
+	slog.Info("控制面板已就绪: 浏览器打开 " + dashboard + " 管理客户端连接")
+	slog.Info("MCP 接入地址: " + dashboard + "/mcp (transport=" + s.cfg.Transport + ")")
+
 	// Wait for signal or error.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
