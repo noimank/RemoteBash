@@ -61,7 +61,7 @@ func (r *Routes) addClient(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	if !validName(name) {
-		writeJSON(w, http.StatusBadRequest, models.ErrorResponse{Error: "名称：仅允许字母、数字、连字符和下划线"})
+		writeJSON(w, http.StatusBadRequest, models.ErrorResponse{Error: "名称不允许包含斜杠字符"})
 		return
 	}
 
@@ -307,10 +307,10 @@ func (r *Routes) deleteAudit(w http.ResponseWriter, req *http.Request) {
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════
 
+// validName rejects names containing '/' which would break URL path routing.
 func validName(s string) bool {
 	for _, c := range s {
-		if !(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') &&
-			!(c >= '0' && c <= '9') && c != '-' && c != '_' {
+		if c == '/' {
 			return false
 		}
 	}

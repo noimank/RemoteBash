@@ -96,7 +96,7 @@ func TestAddClient_Validation(t *testing.T) {
 func TestAddClient_InvalidName(t *testing.T) {
 	mux := setupTestMux(t)
 
-	body := `{"name":"my host!","host":"10.0.0.1","user":"root","password":"x"}`
+	body := `{"name":"my/host","host":"10.0.0.1","user":"root","password":"x"}`
 	req := httptest.NewRequest("POST", "/api/clients", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
