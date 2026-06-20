@@ -306,7 +306,7 @@ func (m *ConnectionManager) GetOrCreateTerminal(name string) (*ssh.PersistentShe
 
 	shell := m.terminals[name]
 	if shell != nil {
-		if !shell.Alive() || shell.SafeRmFlag() != s.SafeRm {
+		if !shell.Alive() || !s.Connected() || shell.SafeRmFlag() != s.SafeRm {
 			shell.Close()
 			shell = nil
 		}

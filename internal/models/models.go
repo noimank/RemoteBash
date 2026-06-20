@@ -143,8 +143,11 @@ type WebSocketResize struct {
 }
 
 // ErrorResponse is a standard JSON error envelope.
+// Name is set only when the operation partially succeeded (e.g. a client was
+// persisted but its auto-connect failed), so the frontend can refresh the list.
 type ErrorResponse struct {
 	Error string `json:"error"`
+	Name  string `json:"name,omitempty"`
 }
 
 // OKResponse is a simple success envelope.

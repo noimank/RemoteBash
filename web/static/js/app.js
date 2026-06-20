@@ -178,7 +178,8 @@ document.getElementById("addForm").onsubmit = async (e) => {
       const data = JSON.parse(err.message);
       if (data.name) { added = true; msg = data.error || msg; }
     } catch (_) { /* 非 JSON 响应，按普通错误处理 */ }
-    toast(msg, !added);
+    // 无论是否入库，这里都是失败信息，按错误样式提示；但已入库时仍需刷新列表
+    toast(msg, true);
     if (!added) return; // 真正的入库失败（409 等），不重置表单也不刷新
   }
   refresh();

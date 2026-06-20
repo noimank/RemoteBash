@@ -96,8 +96,16 @@ func (r *Routes) addClient(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		if err := s.Connect(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, models.ErrorResponse{Error: fmt.Sprintf("已添加但连接失败: %v", err)})
+			writeJSON(w, http.StatusInternalServerError, models.ErrorResponse{
+				Name:  name,
+				Error: fmt.Sprintf("已添加但连接失败: %v", err),
+			})
 			return
+		}
+		// Eagerly start the shell so shell_type is populated
+		// for list_remote_clients / dashboard.
+		if _, shellErr := s.EnsureShell(); shellErr != nil {
+			slog.Warn("添加客户端时启动shell失败", "name", name, "err", shellErr)
 		}
 		// Refresh info after connect.
 		updated := s.ToInfo()
@@ -141,6 +149,7 @@ func (r *Routes) disconnectClient(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusNotFound, models.ErrorResponse{Error: fmt.Sprintf("客户端 '%s' 不存在", name)})
 		return
 	}
+	r.Mgr.CloseTerminal(name)
 	s.Disconnect()
 	writeJSON(w, http.StatusOK, models.OKResponse{OK: true, Name: name})
 }
@@ -155,6 +164,9 @@ func (r *Routes) testClient(w http.ResponseWriter, req *http.Request) {
 
 	err = s.TestConnection()
 	if err == nil {
+		if _, shellErr := s.EnsureShell(); shellErr != nil {
+			slog.Warn("测试连接时启动shell失败", "name", name, "err", shellErr)
+		}
 		info := s.ToInfo()
 		writeJSON(w, http.StatusOK, info)
 		return
