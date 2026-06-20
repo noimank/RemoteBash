@@ -109,6 +109,7 @@ func (s *Server) buildMux() http.Handler {
 	// Dashboard pages.
 	mux.HandleFunc("GET /{$}", s.dashboardPage)
 	mux.HandleFunc("GET /audit", s.auditPage)
+	mux.HandleFunc("GET /guide", s.guidePage)
 
 	// Static files.
 	mux.Handle("GET /static/", http.StripPrefix("/static/", s.staticFS))
@@ -143,6 +144,20 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "base.gohtml", data); err != nil {
 		slog.Error("渲染审计页失败", "err", err)
+	}
+}
+
+// guidePage renders the usage guide HTML page. The template uses the live
+// dashboard URL and configured transport so MCP endpoint snippets and config
+// examples are always correct without manual editing.
+func (s *Server) guidePage(w http.ResponseWriter, r *http.Request) {
+	data := map[string]any{
+		"DashboardURL": s.cfg.DashboardURL(),
+		"Transport":    s.cfg.Transport,
+		"ActivePage":   "guide",
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "base.gohtml", data); err != nil {
+		slog.Error("渲染使用指南失败", "err", err)
 	}
 }
 

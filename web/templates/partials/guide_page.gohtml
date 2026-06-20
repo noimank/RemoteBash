@@ -1,0 +1,215 @@
+{{define "guide_page"}}
+<main class="max-w-5xl mx-auto px-6 py-8 space-y-8">
+
+  <!-- 快速开始 -->
+  <section class="bg-surface-raised border border-border rounded-2xl p-6">
+    <h2 class="text-base font-semibold mb-3 flex items-center gap-2">
+      <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      使用指南
+    </h2>
+    <p class="text-sm text-muted mb-5 leading-relaxed">
+      RemoteBash 通过标准 <a href="https://modelcontextprotocol.io" target="_blank" rel="noopener" class="text-accent hover:underline">MCP 协议</a>
+      把你的远程主机暴露给智能体。下方三步即可让任意支持 MCP 的客户端在你的服务器上执行命令、传输文件。
+    </p>
+    <div class="grid sm:grid-cols-3 gap-3">
+      <div class="bg-surface border border-border rounded-xl p-4">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="w-5 h-5 rounded-full bg-accent/15 text-accent text-xs font-bold flex items-center justify-center">1</span>
+          <span class="text-sm font-medium text-gray-200">添加客户端</span>
+        </div>
+        <p class="text-xs text-muted leading-relaxed">回到 <a href="/" class="text-accent hover:underline">连接列表</a>，填入 SSH 主机、端口、凭据并保存。</p>
+      </div>
+      <div class="bg-surface border border-border rounded-xl p-4">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="w-5 h-5 rounded-full bg-accent/15 text-accent text-xs font-bold flex items-center justify-center">2</span>
+          <span class="text-sm font-medium text-gray-200">启用连接</span>
+        </div>
+        <p class="text-xs text-muted leading-relaxed">确认客户端处于「已启用」状态，否则不会被 <code class="text-gray-300">list_remote_clients</code> 列出。</p>
+      </div>
+      <div class="bg-surface border border-border rounded-xl p-4">
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="w-5 h-5 rounded-full bg-accent/15 text-accent text-xs font-bold flex items-center justify-center">3</span>
+          <span class="text-sm font-medium text-gray-200">接入 MCP</span>
+        </div>
+        <p class="text-xs text-muted leading-relaxed">把下方的接入地址填入你的智能体配置，重启客户端即可调用。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 接入地址 -->
+  <section class="bg-surface-raised border border-border rounded-2xl p-6">
+    <h3 class="text-sm font-semibold mb-4 flex items-center gap-2">
+      <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+      接入地址
+    </h3>
+    <div class="config-block">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] text-muted uppercase tracking-wide">MCP Endpoint</span>
+        <button type="button" onclick="copyBlock(this)" class="flex items-center gap-1 text-[11px] text-muted hover:text-accent transition-colors font-medium" title="复制接入地址">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          <span class="copy-label">复制</span>
+        </button>
+      </div>
+      <pre class="text-sm font-mono text-accent bg-surface px-3 py-2.5 rounded-lg overflow-x-auto whitespace-pre">{{.DashboardURL}}/mcp</pre>
+    </div>
+    <div class="flex flex-wrap gap-x-6 gap-y-1.5 mt-3 text-xs text-muted">
+      <div><span class="text-[10px] uppercase tracking-wide">传输协议</span> <code class="font-mono text-gray-300 ml-1">{{if eq .Transport "sse"}}SSE (legacy){{else}}Streamable HTTP (2025){{end}}</code></div>
+      <div><span class="text-[10px] uppercase tracking-wide">启动参数</span> <code class="font-mono text-gray-300 ml-1">--transport {{.Transport}}</code></div>
+    </div>
+    <p class="text-xs text-muted mt-3 leading-relaxed">
+      若智能体运行在其它机器上，请把 <code class="text-gray-300">localhost</code> 替换为本机可被访问的 IP / 域名，并使用 <code class="text-gray-300">--host 0.0.0.0</code> 启动。
+    </p>
+  </section>
+
+  <!-- 接入智能体框架 -->
+  <section class="bg-surface-raised border border-border rounded-2xl p-6">
+    <h3 class="text-sm font-semibold mb-4 flex items-center gap-2">
+      <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-2a4 4 0 10-8 0 4 4 0 008 0zm6-3a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      接入智能体框架
+    </h3>
+
+    <div class="tab-bar flex flex-wrap gap-1 mb-4 border-b border-border pb-3">
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border bg-surface-overlay text-white border-accent" data-tab="claude-code" onclick="switchTab(this)">Claude Code</button>
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border border-transparent text-muted hover:text-white" data-tab="codex" onclick="switchTab(this)">Codex</button>
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border border-transparent text-muted hover:text-white" data-tab="opencode" onclick="switchTab(this)">OpenCode</button>
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border border-transparent text-muted hover:text-white" data-tab="gemini" onclick="switchTab(this)">Gemini CLI</button>
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border border-transparent text-muted hover:text-white" data-tab="crush" onclick="switchTab(this)">Crush</button>
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border border-transparent text-muted hover:text-white" data-tab="claude-desktop" onclick="switchTab(this)">Claude Desktop</button>
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border border-transparent text-muted hover:text-white" data-tab="cursor" onclick="switchTab(this)">Cursor</button>
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border border-transparent text-muted hover:text-white" data-tab="windsurf" onclick="switchTab(this)">Windsurf</button>
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border border-transparent text-muted hover:text-white" data-tab="vscode" onclick="switchTab(this)">VS Code</button>
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border border-transparent text-muted hover:text-white" data-tab="cline" onclick="switchTab(this)">Cline</button>
+      <button type="button" class="tab rounded-lg px-3 py-1.5 text-xs font-medium transition-colors border border-transparent text-muted hover:text-white" data-tab="generic" onclick="switchTab(this)">通用 JSON</button>
+    </div>
+
+    <!-- Claude Code -->
+    <div class="tab-panel space-y-3" data-panel="claude-code">
+      <p class="text-xs text-muted leading-relaxed">支持 CLI 一行命令添加（流式 HTTP）。默认作用域 <code class="text-gray-300">local</code>（仅当前项目），加 <code class="text-gray-300">--scope user</code> 对所有项目生效。</p>
+      {{template "guide_config"(printf "# 添加（默认 local，仅当前项目）\nclaude mcp add --transport http remotebash %s/mcp\n\n# 或用户级（所有项目可用）\nclaude mcp add --transport http --scope user remotebash %s/mcp\n\n# 查看已接入 / 详情\nclaude mcp list\nclaude mcp get remotebash\n\n# 删除\nclaude mcp remove remotebash" .DashboardURL .DashboardURL)}}
+      <p class="text-xs text-muted leading-relaxed pt-1">或直接写配置文件：项目根目录 <code class="text-gray-300">.mcp.json</code>（团队共享），用户级 <code class="text-gray-300">~/.claude.json</code>。HTTP 服务器需声明 <code class="text-gray-300">"type": "http"</code>。</p>
+      {{template "guide_config"(printf "{\n  \"mcpServers\": {\n    \"remotebash\": {\n      \"type\": \"http\",\n      \"url\": \"%s/mcp\"\n    }\n  }\n}" .DashboardURL)}}
+    </div>
+
+    <!-- Codex -->
+    <div class="tab-panel space-y-3 hidden" data-panel="codex">
+      <p class="text-xs text-muted leading-relaxed">编辑 <code class="text-gray-300">~/.codex/config.toml</code>（用户级）或项目内 <code class="text-gray-300">.codex/config.toml</code>。Codex 通过 <code class="text-gray-300">url</code> 字段支持流式 HTTP，需 Codex <code class="text-gray-300">0.34.0+</code>。</p>
+      {{template "guide_config"(printf "# ~/.codex/config.toml\n[mcp_servers.remotebash]\nurl = \"%s/mcp\"" .DashboardURL)}}
+      <p class="text-xs text-muted leading-relaxed pt-1">Codex 无 <code class="text-gray-300">mcp add</code> 命令，增删均改此文件：<span class="text-gray-200">添加</span>＝追加上面的段；<span class="text-gray-200">删除/禁用</span>＝删掉该段，或在段内加 <code class="text-gray-300">enabled = false</code>。长耗时命令可追加 <code class="text-gray-300">startup_timeout_sec</code> / <code class="text-gray-300">tool_timeout_sec</code>。</p>
+    </div>
+
+    <!-- OpenCode -->
+    <div class="tab-panel space-y-3 hidden" data-panel="opencode">
+      <p class="text-xs text-muted leading-relaxed">在项目根目录的 <code class="text-gray-300">opencode.json</code>（团队共享）或全局 <code class="text-gray-300">~/.config/opencode/opencode.json</code> 的 <code class="text-gray-300">mcp</code> 下添加。流式 HTTP 与 SSE 统一用 <code class="text-gray-300">"type": "remote"</code>。</p>
+      {{template "guide_config"(printf "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"mcp\": {\n    \"remotebash\": {\n      \"type\": \"remote\",\n      \"url\": \"%s/mcp\",\n      \"enabled\": true\n    }\n  }\n}" .DashboardURL)}}
+      <p class="text-xs text-muted leading-relaxed pt-1"><span class="text-gray-200">删除/禁用</span>＝删掉该项，或设 <code class="text-gray-300">"enabled": false</code>。排查连接用 <code class="text-gray-300">opencode mcp debug remotebash</code>，查看状态用 <code class="text-gray-300">opencode mcp auth list</code>。</p>
+    </div>
+
+    <!-- Gemini CLI -->
+    <div class="tab-panel space-y-3 hidden" data-panel="gemini">
+      <p class="text-xs text-muted leading-relaxed">支持 CLI 命令（流式 HTTP）。默认作用域 <code class="text-gray-300">project</code>（写入项目内 <code class="text-gray-300">.gemini/settings.json</code>），加 <code class="text-gray-300">-s user</code> 写入 <code class="text-gray-300">~/.gemini/settings.json</code> 对所有项目生效。</p>
+      {{template "guide_config"(printf "# 添加（默认 scope=project）\ngemini mcp add --transport http remotebash %s/mcp\n\n# 用户级（所有项目可用）\ngemini mcp add --transport http -s user remotebash %s/mcp\n\n# 查看连接状态\ngemini mcp list\n\n# 删除\ngemini mcp remove remotebash" .DashboardURL .DashboardURL)}}
+      <p class="text-xs text-muted leading-relaxed pt-1">或手编 <code class="text-gray-300">~/.gemini/settings.json</code>。注意：流式 HTTP 用 <code class="text-gray-300">httpUrl</code> 字段（SSE 才用 <code class="text-gray-300">url</code>），与多数客户端不同。</p>
+      {{template "guide_config"(printf "{\n  \"mcpServers\": {\n    \"remotebash\": {\n      \"httpUrl\": \"%s/mcp\"\n    }\n  }\n}" .DashboardURL)}}
+    </div>
+
+    <!-- Crush -->
+    <div class="tab-panel space-y-3 hidden" data-panel="crush">
+      <p class="text-xs text-muted leading-relaxed">编辑 Crush 配置（优先级：<code class="text-gray-300">.crush.json</code> → <code class="text-gray-300">crush.json</code> → <code class="text-gray-300">~/.config/crush/crush.json</code>）的 <code class="text-gray-300">mcp</code> 下添加。HTTP / SSE 分别用 <code class="text-gray-300">"type": "http"</code> / <code class="text-gray-300">"sse"</code>。</p>
+      {{template "guide_config"(printf "{\n  \"$schema\": \"https://charm.land/crush.json\",\n  \"mcp\": {\n    \"remotebash\": {\n      \"type\": \"http\",\n      \"url\": \"%s/mcp\",\n      \"timeout\": 120\n    }\n  }\n}" .DashboardURL)}}
+      <p class="text-xs text-muted leading-relaxed pt-1">Crush 无 <code class="text-gray-300">mcp add</code> 命令，增删均改此文件：<span class="text-gray-200">添加</span>＝追加上面的项；<span class="text-gray-200">删除/禁用</span>＝删掉该项，或加 <code class="text-gray-300">"disabled": true</code>。</p>
+    </div>
+
+    <!-- Claude Desktop -->
+    <div class="tab-panel space-y-3 hidden" data-panel="claude-desktop">
+      <p class="text-xs text-muted leading-relaxed">编辑配置文件（macOS：<code class="text-gray-300">~/Library/Application Support/Claude/claude_desktop_config.json</code>；Windows：<code class="text-gray-300">%APPDATA%\Claude\claude_desktop_config.json</code>），完全退出后重启 Claude Desktop。</p>
+      {{template "guide_config"(printf "{\n  \"mcpServers\": {\n    \"remotebash\": {\n      \"url\": \"%s/mcp\"\n    }\n  }\n}" .DashboardURL)}}
+    </div>
+
+    <!-- Cursor -->
+    <div class="tab-panel space-y-3 hidden" data-panel="cursor">
+      <p class="text-xs text-muted leading-relaxed">在项目根目录创建 <code class="text-gray-300">.cursor/mcp.json</code>（项目级），或通过 <code class="text-gray-300">Settings → Cursor Settings → MCP</code> 添加全局配置。</p>
+      {{template "guide_config"(printf "{\n  \"mcpServers\": {\n    \"remotebash\": {\n      \"url\": \"%s/mcp\"\n    }\n  }\n}" .DashboardURL)}}
+    </div>
+
+    <!-- Windsurf -->
+    <div class="tab-panel space-y-3 hidden" data-panel="windsurf">
+      <p class="text-xs text-muted leading-relaxed">通过 <code class="text-gray-300">Settings → MCP Servers</code> 界面添加，或编辑 <code class="text-gray-300">mcp_config.json</code>。注意 Windsurf 使用 <code class="text-gray-300">serverUrl</code> 字段。</p>
+      {{template "guide_config"(printf "{\n  \"mcpServers\": {\n    \"remotebash\": {\n      \"serverUrl\": \"%s/mcp\"\n    }\n  }\n}" .DashboardURL)}}
+    </div>
+
+    <!-- VS Code -->
+    <div class="tab-panel space-y-3 hidden" data-panel="vscode">
+      <p class="text-xs text-muted leading-relaxed">在项目根目录创建 <code class="text-gray-300">.vscode/mcp.json</code>，或用命令面板 <code class="text-gray-300">MCP: Add Server</code>。VS Code 原生 MCP 使用 <code class="text-gray-300">servers</code>（而非 mcpServers）。</p>
+      {{template "guide_config"(printf "{\n  \"servers\": {\n    \"remotebash\": {\n      \"url\": \"%s/mcp\"\n    }\n  }\n}" .DashboardURL)}}
+    </div>
+
+    <!-- Cline -->
+    <div class="tab-panel space-y-3 hidden" data-panel="cline">
+      <p class="text-xs text-muted leading-relaxed">在 Cline 侧边栏打开 <code class="text-gray-300">MCP Servers → Edit MCP Settings</code>，编辑 <code class="text-gray-300">cline_mcp_settings.json</code>：</p>
+      {{template "guide_config"(printf "{\n  \"mcpServers\": {\n    \"remotebash\": {\n      \"url\": \"%s/mcp\",\n      \"disabled\": false,\n      \"autoApprove\": []\n    }\n  }\n}" .DashboardURL)}}
+    </div>
+
+    <!-- 通用 JSON -->
+    <div class="tab-panel space-y-3 hidden" data-panel="generic">
+      <p class="text-xs text-muted leading-relaxed">任何兼容 MCP 2025 Streamable HTTP 的客户端，只需把下面的 <code class="text-gray-300">url</code> 填入对应配置即可。</p>
+      {{template "guide_config"(printf "{\n  \"mcpServers\": {\n    \"remotebash\": {\n      \"url\": \"%s/mcp\"\n    }\n  }\n}" .DashboardURL)}}
+    </div>
+  </section>
+
+  <!-- 传输模式 -->
+  <section class="bg-surface-raised border border-border rounded-2xl p-6">
+    <h3 class="text-sm font-semibold mb-3 flex items-center gap-2">
+      <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>
+      传输模式
+    </h3>
+    <div class="space-y-2.5 text-xs text-muted leading-relaxed">
+      <p>默认使用 <span class="text-gray-200 font-medium">Streamable HTTP</span>（MCP 2025 规范，单端点 <code class="text-gray-300">/mcp</code>），被上述所有现代客户端支持。</p>
+      <p>若客户端仅支持旧版 SSE，可用 <code class="text-gray-300">--transport sse</code> 启动：事件流走 <code class="text-gray-300">GET /mcp</code>，消息走 <code class="text-gray-300">POST /mcp/messages</code>。Claude Desktop 等部分客户端在 SSE 模式下需要 <code class="text-gray-300">sse</code> 字段而非 <code class="text-gray-300">url</code>，请按客户端文档调整。</p>
+    </div>
+  </section>
+
+  <!-- 可用工具 -->
+  <section class="bg-surface-raised border border-border rounded-2xl p-6">
+    <h3 class="text-sm font-semibold mb-4 flex items-center gap-2">
+      <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"/></svg>
+      可用工具
+    </h3>
+    <div class="space-y-3">
+      <div class="bg-surface border border-border rounded-xl p-4">
+        <div class="flex items-center gap-2 mb-1.5">
+          <code class="text-sm font-mono text-accent">remote_shell</code>
+          <span class="text-[10px] text-muted bg-surface-overlay px-1.5 py-0.5 rounded">client_name · command · timeout?</span>
+        </div>
+        <p class="text-xs text-muted leading-relaxed">在远程主机上执行 shell 命令。基于每个主机的长连接交互式 PTY shell，工作目录、环境变量、别名与历史在多次调用间保持。命令必须非交互（避免 <code class="text-gray-300">rm -i</code>、密码提示、<code class="text-gray-300">top</code>、<code class="text-gray-300">vim</code>）。返回 <code class="text-gray-300">{output, exit_code, cwd}</code>。</p>
+      </div>
+      <div class="bg-surface border border-border rounded-xl p-4">
+        <div class="flex items-center gap-2 mb-1.5">
+          <code class="text-sm font-mono text-accent">list_remote_clients</code>
+          <span class="text-[10px] text-muted bg-surface-overlay px-1.5 py-0.5 rounded">无参数</span>
+        </div>
+        <p class="text-xs text-muted leading-relaxed">列出所有已启用的远程主机，智能体据此选择目标。返回 <code class="text-gray-300">[{client_name, host, port, user, cwd, safe_rm, shell_type}, ...]</code>。</p>
+      </div>
+      <div class="bg-surface border border-border rounded-xl p-4">
+        <div class="flex items-center gap-2 mb-1.5">
+          <code class="text-sm font-mono text-accent">data_transfer</code>
+          <span class="text-[10px] text-muted bg-surface-overlay px-1.5 py-0.5 rounded">client_name · src · dst · direction?</span>
+        </div>
+        <p class="text-xs text-muted leading-relaxed">通过 SFTP 在本机与远程主机之间传输文件。<code class="text-gray-300">direction</code> 取 <code class="text-gray-300">local2remote</code>（默认，上传）或 <code class="text-gray-300">remote2local</code>（下载）。返回 <code class="text-gray-300">{success, direction, src, dst, size_bytes, duration_ms}</code>。</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+{{end}}
+
+{{define "guide_config"}}
+<div class="config-block">
+  <div class="flex items-center justify-end mb-1.5">
+    <button type="button" onclick="copyBlock(this)" class="flex items-center gap-1 text-[11px] text-muted hover:text-accent transition-colors font-medium" title="复制配置">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+      <span class="copy-label">复制</span>
+    </button>
+  </div>
+  <pre class="text-xs text-gray-300 bg-surface px-3 py-2.5 rounded-lg overflow-x-auto whitespace-pre">{{.}}</pre>
+</div>
+{{end}}
