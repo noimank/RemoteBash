@@ -84,11 +84,9 @@ func (s *RemoteSession) SetTunnelResolver(r TunnelResolver) {
 }
 
 // Connect establishes the SSH connection (direct or via jump host).
+// Enabled flag does NOT gate connectivity — it only controls MCP visibility
+// (ListEnabled). A disabled jump host still serves its dependents.
 func (s *RemoteSession) Connect() error {
-	if !s.Enabled {
-		return fmt.Errorf("client '%s' is disabled", s.Name)
-	}
-
 	s.connectLock.Lock()
 	defer s.connectLock.Unlock()
 
@@ -227,10 +225,6 @@ func (s *RemoteSession) EnsureShell() (*PersistentShell, error) {
 // Uses lazy connect: establishes the SSH connection on first call.
 // Concurrent callers are serialised via execLock.
 func (s *RemoteSession) Exec(command string, timeout time.Duration) (*CommandOutput, error) {
-	if !s.Enabled {
-		return nil, fmt.Errorf("client '%s' is disabled", s.Name)
-	}
-
 	s.execLock.Lock()
 	defer s.execLock.Unlock()
 
@@ -272,10 +266,6 @@ func (s *RemoteSession) Exec(command string, timeout time.Duration) (*CommandOut
 
 // Transfer performs an SFTP file transfer.
 func (s *RemoteSession) Transfer(src, dst, direction string) (*TransferOutput, error) {
-	if !s.Enabled {
-		return nil, fmt.Errorf("client '%s' is disabled", s.Name)
-	}
-
 	if err := s.Connect(); err != nil {
 		return nil, err
 	}
@@ -382,9 +372,6 @@ func (s *RemoteSession) TestConnection() error {
 // OpenTerminalShell creates a separate PersistentShell for the browser terminal.
 // This is independent of the MCP exec shell.
 func (s *RemoteSession) OpenTerminalShell() (*PersistentShell, error) {
-	if !s.Enabled {
-		return nil, fmt.Errorf("client '%s' is disabled", s.Name)
-	}
 	if err := s.Connect(); err != nil {
 		return nil, err
 	}

@@ -115,8 +115,8 @@ function renderClient(c) {
         ? '<span class="text-[10px] tracking-wider bg-accent/10 text-accent border border-accent/30 rounded px-1.5 py-0.5 font-medium" title="通过 ' + js(c.via) + ' 透传">⎇ ' + js(c.via) + '</span>'
         : ''}
       <span class="ml-auto flex gap-2">
-        <button onclick="openTerminal('${js(c.name)}')" class="rounded-lg bg-accent/10 border border-accent/40 hover:bg-accent/20 text-accent text-xs px-3 py-1.5 transition-colors font-medium" title="打开浏览器终端">终端</button>
-        <button onclick="testConnect('${c.name}')" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-2.5 py-1.5 transition-colors font-medium" title="测试连接">测试</button>
+        ${c.enabled ? `<button onclick="openTerminal('${js(c.name)}')" class="rounded-lg bg-accent/10 border border-accent/40 hover:bg-accent/20 text-accent text-xs px-3 py-1.5 transition-colors font-medium" title="打开浏览器终端">终端</button>` : ''}
+        ${c.enabled ? `<button onclick="testConnect('${c.name}')" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-2.5 py-1.5 transition-colors font-medium" title="测试连接">测试</button>` : ''}
         <button onclick="editClient('${js(c.name)}','${js(c.host)}','${js(c.port)}','${js(c.user)}','','${js(c.via || '')}')" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium" title="编辑连接信息">编辑</button>
         ${c.enabled
           ? `<button onclick="disableClient('${js(c.name)}')" class="rounded-lg border border-yellow/30 hover:bg-yellow/10 text-yellow text-xs px-3 py-1.5 transition-colors font-medium">禁用</button>`
@@ -126,9 +126,7 @@ function renderClient(c) {
           : `<button onclick="toggleSafeRm('${js(c.name)}',true)"  class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium" title="开启安全删除 (rm→mv /tmp)">🔰</button>`}
         ${c.connected
           ? `<button onclick="disconnect('${js(c.name)}')" class="rounded-lg border border-red/30 hover:bg-red/10 text-red text-xs px-3 py-1.5 transition-colors font-medium">断开</button>`
-          : c.enabled
-            ? `<button onclick="connect('${js(c.name)}')" class="rounded-lg bg-green/10 border border-green/30 hover:bg-green/20 text-green text-xs px-3 py-1.5 transition-colors font-medium">连接</button>`
-            : ''}
+          : `<button onclick="connect('${js(c.name)}')" class="rounded-lg bg-green/10 border border-green/30 hover:bg-green/20 text-green text-xs px-3 py-1.5 transition-colors font-medium">连接</button>`}
         <button onclick="removeClient('${js(c.name)}')" class="rounded-lg border border-border hover:border-red/40 hover:text-red text-muted text-xs px-3 py-1.5 transition-colors font-medium">&times;</button>
       </span>
     </div>`;

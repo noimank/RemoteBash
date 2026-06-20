@@ -185,14 +185,20 @@ func (m *ConnectionManager) Remove(name string) error {
 			name, joinNames(deps))
 	}
 
-	// Snapshot the session and release manager lock before acquiring execLock.
-	// This avoids a deadlock: Remove holds m.mu, Exec holds execLock then calls
-	// m.mu.RLock via Get() during audit callback (the resolver path is safe,
-	// but defensive ordering is still correct).
+	// Snapshot the session, terminal, and release manager lock before
+	// acquiring execLock. This avoids a deadlock: Remove holds m.mu,
+	// Exec holds execLock then calls m.mu.RLock via Get() during audit
+	// callback (the resolver path is safe, but defensive ordering is
+	// still correct).
 	s := m.sessions[name]
-	m.closeTerminalLocked(name)
+	term := m.terminals[name]
+	delete(m.terminals, name)
 	delete(m.sessions, name)
 	m.mu.Unlock()
+
+	if term != nil {
+		term.Close()
+	}
 
 	// Wait for in-flight Exec() to finish, then tear down the connection.
 	s.ExecLock()
