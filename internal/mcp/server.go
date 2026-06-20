@@ -155,7 +155,6 @@ func (b *MCPBridge) registerTools() {
 	toolDT := mcp.NewTool("data_transfer",
 		mcp.WithDescription(
 			"Transfer files between this server and a remote host via SFTP. "+
-				"Use remote_shell for command execution. "+
 				"Returns {success, direction, src, dst, size_bytes, duration_ms}."),
 		mcp.WithString("client_name",
 			mcp.Required(),
