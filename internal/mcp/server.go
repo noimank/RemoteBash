@@ -78,8 +78,8 @@ func (b *MCPBridge) registerTools() {
 				"directory behave as in a real terminal."),
 		),
 		mcp.WithNumber("timeout",
-			mcp.Description("Timeout in seconds. Increase for long-running builds, installs, "+
-				"or diagnostics."),
+			mcp.Description("Timeout in seconds (1–3600). Increase for long-running builds, "+
+				"installs, or diagnostics."),
 		),
 	)
 
@@ -88,17 +88,26 @@ func (b *MCPBridge) registerTools() {
 		if !ok {
 			return mcpError("invalid arguments: expected object"), nil
 		}
-		clientName := getString(args, "client_name")
-		if clientName == "" {
-			return mcpError("缺少必填参数 client_name。请使用 list_remote_clients 获取可用的远程主机名称。"), nil
+		clientName, err := getString(args, "client_name", true)
+		if err != nil {
+			return mcpError(fmt.Sprintf("Invalid parameter: %v. Use list_remote_clients to get available host names.", err)), nil
 		}
-		command := getString(args, "command")
+		command, err := getString(args, "command", true)
+		if err != nil {
+			return mcpError(fmt.Sprintf("Invalid parameter: %v", err)), nil
+		}
 		timeout := getInt(args, "timeout", 30)
+		if timeout < 1 {
+			timeout = 1
+		}
+		if timeout > 3600 {
+			timeout = 3600
+		}
 
 		sess, err := b.mgr.Get(clientName)
 		if err != nil {
-			slog.Warn("MCP 客户端未找到", "client", clientName)
-			return mcpError(fmt.Sprintf("客户端 '%s' 不存在。%v", clientName, err)), nil
+			slog.Warn("MCP client not found", "client", clientName)
+			return mcpError(fmt.Sprintf("Client '%s' not found: %v", clientName, err)), nil
 		}
 
 		result, err := sess.Exec(command, time.Duration(timeout)*time.Second)
@@ -181,13 +190,22 @@ func (b *MCPBridge) registerTools() {
 		if !ok {
 			return mcpError("invalid arguments: expected object"), nil
 		}
-		clientName := getString(args, "client_name")
-		if clientName == "" {
-			return mcpError("缺少必填参数 client_name。请使用 list_remote_clients 获取可用的远程主机名称。"), nil
+		clientName, err := getString(args, "client_name", true)
+		if err != nil {
+			return mcpError(fmt.Sprintf("Invalid parameter: %v. Use list_remote_clients to get available host names.", err)), nil
 		}
-		src := getString(args, "src")
-		dst := getString(args, "dst")
-		direction := getString(args, "direction", "local2remote")
+		src, err := getString(args, "src", true)
+		if err != nil {
+			return mcpError(fmt.Sprintf("Invalid parameter: %v", err)), nil
+		}
+		dst, err := getString(args, "dst", true)
+		if err != nil {
+			return mcpError(fmt.Sprintf("Invalid parameter: %v", err)), nil
+		}
+		direction, err := getString(args, "direction", false, "local2remote")
+		if err != nil {
+			return mcpError(fmt.Sprintf("Invalid parameter: %v. Expected 'remote2local' or 'local2remote'.", err)), nil
+		}
 
 		if direction != "remote2local" && direction != "local2remote" {
 			return mcpError(fmt.Sprintf("Invalid direction '%s'. Expected 'remote2local' or 'local2remote'.", direction)), nil
@@ -195,13 +213,13 @@ func (b *MCPBridge) registerTools() {
 
 		sess, err := b.mgr.Get(clientName)
 		if err != nil {
-			slog.Warn("MCP 客户端未找到", "client", clientName)
-			return mcpError(fmt.Sprintf("客户端 '%s' 不存在。%v", clientName, err)), nil
+			slog.Warn("MCP client not found", "client", clientName)
+			return mcpError(fmt.Sprintf("Client '%s' not found: %v", clientName, err)), nil
 		}
 
-		directionLabel := "上传"
+		directionLabel := "upload"
 		if direction == "remote2local" {
-			directionLabel = "下载"
+			directionLabel = "download"
 		}
 		cmdSummary := fmt.Sprintf("[SFTP %s] %s → %s", directionLabel, src, dst)
 
@@ -234,25 +252,34 @@ func (b *MCPBridge) registerTools() {
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-func getString(args map[string]any, key string, defaults ...string) string {
+func getString(args map[string]any, key string, required bool, defaults ...string) (string, error) {
 	if args == nil {
 		if len(defaults) > 0 {
-			return defaults[0]
+			return defaults[0], nil
 		}
-		return ""
+		if required {
+			return "", fmt.Errorf("missing required parameter '%s'", key)
+		}
+		return "", nil
 	}
 	v, ok := args[key]
 	if !ok {
 		if len(defaults) > 0 {
-			return defaults[0]
+			return defaults[0], nil
 		}
-		return ""
+		if required {
+			return "", fmt.Errorf("missing required parameter '%s'", key)
+		}
+		return "", nil
 	}
 	s, ok := v.(string)
 	if !ok {
-		return ""
+		return "", fmt.Errorf("parameter '%s' must be a string, got %T", key, v)
 	}
-	return s
+	if required && s == "" {
+		return "", fmt.Errorf("parameter '%s' must not be empty", key)
+	}
+	return s, nil
 }
 
 func getInt(args map[string]any, key string, defaultVal int) int {
