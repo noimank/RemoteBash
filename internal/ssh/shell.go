@@ -38,6 +38,22 @@ const (
 // Max bytes to buffer when the terminal path is active (512 KiB).
 const terminalBufMax = 512 * 1024
 
+// Max output buffered for a single pending MCP command (2 MiB).
+// When exceeded, the buffer is truncated: head 32 KiB + notice + tail 16 KiB.
+// This prevents OOM from runaway output commands like "cat /dev/zero".
+// Head+tail total is ~12K tokens — enough context for an agent to decide
+// whether to re-run with head/tail or redirect to a file.
+const (
+	maxOutputBytes = 8 * 1024 * 1024
+	headKeepBytes  = 64 * 1024
+	tailKeepBytes  = 32 * 1024
+)
+
+// truncationNoticeFmt is inserted into the command output when maxOutputBytes
+// is exceeded. The %d verb receives the number of bytes omitted.
+const truncationNoticeFmt = "\n\n[RemoteBash: output truncated — %d bytes omitted. " +
+	"Use head/tail or redirect to a file (> /path/to/file) for full output.]\n\n"
+
 // ── ANSI stripping ────────────────────────────────────────────────────
 
 var ansiRe = regexp.MustCompile(
@@ -106,6 +122,7 @@ type tapEntry struct {
 
 type pendingCmd struct {
 	pattern *regexp.Regexp
+	token   string // cached for fast done-prefix scanning via bytes.LastIndex
 	result  chan cmdResult
 }
 
@@ -346,27 +363,69 @@ func (s *PersistentShell) scanLocked() {
 		return
 	}
 
-	// Scan for the done token.
-	m := s.pending.pattern.FindSubmatch(s.buf)
-	if m == nil {
+	// Fast scan: use bytes.LastIndex to find the done sentinel prefix.
+	// This avoids O(n²) regex scanning of the full buffer on every 4 KiB
+	// chunk for long-running / high-output commands.
+	doneKey := []byte(donePrefix + ":" + s.pending.token + ":")
+	if idx := bytes.LastIndex(s.buf, doneKey); idx >= 0 {
+		// Found a candidate — run the full regex to extract groups.
+		// Only search from a conservative window before the done prefix
+		// so the regex never scans megabytes of early output.
+		m := s.pending.pattern.FindSubmatch(s.buf)
+		if m != nil {
+			rawOutput := make([]byte, len(m[1]))
+			copy(rawOutput, m[1])
+			exitCode := 0
+			if _, err := fmt.Sscanf(string(m[2]), "%d", &exitCode); err != nil {
+				slog.Warn("scanLocked: unable to parse exit code", "captured", string(m[2]))
+			}
+			cwd := strings.TrimRight(string(m[3]), " ")
+			s.buf = s.buf[len(m[0]):]
+
+			p := s.pending
+			s.pending = nil
+			select {
+			case p.result <- cmdResult{rawOutput: rawOutput, exitCode: exitCode, cwd: cwd}:
+			default:
+			}
+			return
+		}
+		// If FindSubmatch returned nil (partial match of prefix inside
+		// legitimate output), keep scanning — it wasn't our sentinel.
+	}
+
+	// Enforce max output buffer while waiting for the done sentinel.
+	// Guards against OOM from runaway output (cat /dev/zero, yes, find /, etc.).
+	if len(s.buf) > maxOutputBytes {
+		s.truncateBufferLocked()
+	}
+}
+
+// truncateBufferLocked truncates s.buf when it exceeds maxOutputBytes.
+// Keeps head (headKeepBytes) and tail (tailKeepBytes), inserting a
+// human-readable truncation notice so agents know output was cut.
+// Must be called with s.mu held.
+func (s *PersistentShell) truncateBufferLocked() {
+	total := len(s.buf)
+	omitted := total - headKeepBytes - tailKeepBytes
+	if omitted <= 0 {
 		return
 	}
 
-	rawOutput := make([]byte, len(m[1]))
-	copy(rawOutput, m[1])
-	exitCode := 0
-	if _, err := fmt.Sscanf(string(m[2]), "%d", &exitCode); err != nil {
-		slog.Warn("scanLocked: 无法解析退出码", "captured", string(m[2]))
-	}
-	cwd := strings.TrimRight(string(m[3]), " ")
-	s.buf = s.buf[len(m[0]):]
+	notice := []byte(fmt.Sprintf(truncationNoticeFmt, omitted))
 
-	p := s.pending
-	s.pending = nil
-	select {
-	case p.result <- cmdResult{rawOutput: rawOutput, exitCode: exitCode, cwd: cwd}:
-	default:
-	}
+	newLen := headKeepBytes + len(notice) + tailKeepBytes
+	truncated := make([]byte, newLen)
+	copy(truncated, s.buf[:headKeepBytes])
+	copy(truncated[headKeepBytes:], notice)
+	copy(truncated[headKeepBytes+len(notice):], s.buf[total-tailKeepBytes:])
+	s.buf = truncated
+
+	slog.Warn("命令输出缓冲区已截断",
+		"total_bytes", total,
+		"kept_bytes", newLen,
+		"omitted_bytes", omitted,
+	)
 }
 
 // ── Command execution (MCP path) ──────────────────────────────────────
@@ -405,7 +464,7 @@ func (s *PersistentShell) dispatch(command string) (chan cmdResult, string, erro
 
 	token := randomToken()
 	resultCh := make(chan cmdResult, 1)
-	s.pending = &pendingCmd{pattern: s.donePattern(token), result: resultCh}
+	s.pending = &pendingCmd{pattern: s.donePattern(token), token: token, result: resultCh}
 
 	payload := s.buildPayload(command, token)
 	if _, err := s.stdin.Write(payload); err != nil {
