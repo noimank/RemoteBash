@@ -38,6 +38,7 @@ type RemoteSession struct {
 	connectLock    sync.Mutex       // guards Connect against TOCTOU races
 	disconnectLock sync.Mutex       // serialises Disconnect calls
 	cwd            string
+	homeCache      string // cached remote $HOME, valid for session lifetime
 	auditCb        AuditCallback
 	tunnelResolver TunnelResolver // callable: name → *gossh.Client
 	relay          *SocatTunnelRelay
@@ -177,6 +178,7 @@ func (s *RemoteSession) Disconnect() {
 		s.shell = nil
 	}
 	s.shellType = ""
+	s.homeCache = ""
 	s.shellLock.Unlock()
 
 	if s.conn != nil {
@@ -424,17 +426,38 @@ func (s *RemoteSession) ExecLock() { s.execLock.Lock() }
 // ExecUnlock releases the exec lock.
 func (s *RemoteSession) ExecUnlock() { s.execLock.Unlock() }
 
+// home returns the remote $HOME, using a cached value after first fetch.
+// $HOME is invariant for the life of an SSH connection, so it is safe to cache.
+func (s *RemoteSession) home() string {
+	if s.homeCache != "" {
+		return s.homeCache
+	}
+
+	// Use a short-lived SSH session (reuses the existing TCP/encrypted
+	// connection — no re-auth) to avoid competing on execLock with
+	// concurrent command executions.  Typical cost: 2 RTT.
+	sess, err := s.conn.NewSession()
+	if err != nil {
+		return ""
+	}
+	defer sess.Close()
+
+	out, err := sess.Output("echo $HOME")
+	if err != nil {
+		return ""
+	}
+
+	s.homeCache = strings.TrimSpace(string(out))
+	return s.homeCache
+}
+
 // expandRemotePath expands ~ to the remote home directory.
 func (s *RemoteSession) expandRemotePath(path string) string {
 	if !strings.Contains(path, "~") {
 		return path
 	}
 
-	result, err := s.Exec("echo $HOME", 5*time.Second)
-	if err != nil {
-		return path
-	}
-	home := strings.TrimSpace(result.Output)
+	home := s.home()
 	if home == "" {
 		return path
 	}
