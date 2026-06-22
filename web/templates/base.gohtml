@@ -3,7 +3,7 @@
 <head>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230f1117'/><text x='50%25' y='53%25' dominant-baseline='middle' text-anchor='middle' font-family='monospace' font-size='18' font-weight='bold' fill='%2358a6ff'>▶</text></svg>"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>RemoteBash{{if eq .ActivePage "dashboard"}} · Dashboard{{else if eq .ActivePage "audit"}} · 审计日志{{else if eq .ActivePage "guide"}} · 使用指南{{end}}</title>
+  <title>RemoteBash{{if eq .ActivePage "dashboard"}} · Dashboard{{else if eq .ActivePage "audit"}} · 审计日志{{else if eq .ActivePage "guide"}} · 使用指南{{else if eq .ActivePage "logs"}} · 运行日志{{end}}</title>
   <script src="/static/js/vendor/tailwind.js"></script>
   <script>
     tailwind.config = {
@@ -47,6 +47,7 @@
       <nav class="ml-6 flex gap-1">
         <a href="/" class="rounded-lg px-3 py-1.5 text-sm transition-colors hover:bg-surface-overlay {{if eq .ActivePage "dashboard"}}bg-surface-overlay text-white{{else}}text-muted{{end}}">连接列表</a>
         <a href="/audit" class="rounded-lg px-3 py-1.5 text-sm transition-colors hover:bg-surface-overlay {{if eq .ActivePage "audit"}}bg-surface-overlay text-white{{else}}text-muted{{end}}">审计日志</a>
+        <a href="/logs" class="rounded-lg px-3 py-1.5 text-sm transition-colors hover:bg-surface-overlay {{if eq .ActivePage "logs"}}bg-surface-overlay text-white{{else}}text-muted{{end}}">运行日志</a>
         <a href="/guide" class="rounded-lg px-3 py-1.5 text-sm transition-colors hover:bg-surface-overlay {{if eq .ActivePage "guide"}}bg-surface-overlay text-white{{else}}text-muted{{end}}">使用指南</a>
       </nav>
       <span class="ml-auto text-xs text-muted hidden sm:inline">v2.0.0</span>
@@ -70,6 +71,9 @@
   {{else if eq .ActivePage "guide"}}
     {{template "guide_page" .}}
     <script src="/static/js/guide.js"></script>
+  {{else if eq .ActivePage "logs"}}
+    {{template "log_page" .}}
+    <script src="/static/js/log.js"></script>
   {{end}}
 
   <div id="toast" class="fixed top-5 right-5 z-50 bg-surface-overlay border border-border rounded-xl px-5 py-3 text-sm shadow-2xl opacity-0 translate-y-2 transition-all duration-300 pointer-events-none"></div>

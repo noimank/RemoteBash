@@ -31,6 +31,9 @@ func (r *Routes) Register(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/audit", r.listAudit)
 	mux.HandleFunc("DELETE /api/audit", r.deleteAudit)
+
+	mux.HandleFunc("GET /api/logs", r.listLogs)
+	mux.HandleFunc("DELETE /api/logs", r.deleteLogs)
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -313,6 +316,64 @@ func (r *Routes) deleteAudit(w http.ResponseWriter, req *http.Request) {
 	}
 
 	writeJSON(w, http.StatusBadRequest, models.ErrorResponse{Error: "请提供删除条件: entry_id, entry_ids, client_name, 或 before_id"})
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Server Logs
+// ═══════════════════════════════════════════════════════════════════════
+
+func (r *Routes) listLogs(w http.ResponseWriter, req *http.Request) {
+	q := req.URL.Query()
+	level := q.Get("level")
+	after := q.Get("after")
+	before := q.Get("before")
+	limit := intQuery(q, "limit", 200)
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	offset := intQuery(q, "offset", 0)
+	if offset < 0 {
+		offset = 0
+	}
+
+	var lv *string
+	if level != "" {
+		lv = &level
+	}
+	var af, bf *string
+	if after != "" {
+		af = &after
+	}
+	if before != "" {
+		bf = &before
+	}
+
+	resp, err := r.Mgr.LogList(lv, af, bf, limit, offset)
+	if err != nil {
+		slog.Warn("服务器日志查询失败", "err", err)
+		writeJSON(w, http.StatusInternalServerError, models.ErrorResponse{Error: "查询服务器日志失败"})
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (r *Routes) deleteLogs(w http.ResponseWriter, req *http.Request) {
+	q := req.URL.Query()
+	bf := q.Get("before_id")
+	if bf == "" {
+		writeJSON(w, http.StatusBadRequest, models.ErrorResponse{Error: "请提供 before_id 参数"})
+		return
+	}
+	id, err := strconv.Atoi(bf)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, models.ErrorResponse{Error: "invalid before_id"})
+		return
+	}
+	deleted, _ := r.Mgr.LogDelete(id)
+	writeJSON(w, http.StatusOK, models.AuditDeleteResponse{OK: true, Deleted: int(deleted)})
 }
 
 // ═══════════════════════════════════════════════════════════════════════

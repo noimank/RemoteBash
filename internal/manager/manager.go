@@ -465,3 +465,30 @@ func (m *ConnectionManager) AuditDelete(entryID *int, entryIDs []int,
 	}
 	return 0, nil
 }
+
+// ── Log queries ───────────────────────────────────────────────────────
+
+// LogList returns paginated server log entries.
+func (m *ConnectionManager) LogList(level *string, after, before *string,
+	limit, offset int) (*models.LogListResponse, error) {
+
+	entries, err := database.QueryLog(m.db, level, after, before, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	total, err := database.CountLog(m.db, level, after, before)
+	if err != nil {
+		return nil, err
+	}
+	return &models.LogListResponse{
+		Entries: entries,
+		Total:   total,
+		Limit:   limit,
+		Offset:  offset,
+	}, nil
+}
+
+// LogDelete deletes all log entries before the given ID.
+func (m *ConnectionManager) LogDelete(beforeID int) (int64, error) {
+	return database.DeleteLogBeforeID(m.db, beforeID)
+}

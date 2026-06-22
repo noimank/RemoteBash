@@ -40,6 +40,7 @@ func main() {
 	}
 
 	if err := srv.Run(); err != nil {
+		slog.Error("运行错误", "err", err)
 		fmt.Fprintf(os.Stderr, "运行错误: %v\n", err)
 		os.Exit(1)
 	}

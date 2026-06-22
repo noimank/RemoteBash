@@ -24,14 +24,15 @@ import (
 
 // Server is the assembled RemoteBash HTTP+MCP server.
 type Server struct {
-	cfg      *config.ServerConfig
-	db       *sql.DB
-	mgr      *manager.ConnectionManager
-	mcp      *mcp.MCPBridge
-	http     *http.Server
-	tmpl     *template.Template
-	staticFS http.Handler
-	mux      http.Handler
+	cfg        *config.ServerConfig
+	db         *sql.DB
+	mgr        *manager.ConnectionManager
+	mcp        *mcp.MCPBridge
+	http       *http.Server
+	tmpl       *template.Template
+	staticFS   http.Handler
+	mux        http.Handler
+	logHandler *database.DBHandler
 }
 
 // New creates the assembled server (without starting it).
@@ -44,6 +45,15 @@ func New(cfg *config.ServerConfig) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+
+	// Replace the stderr-only slog handler with a dual handler that also
+	// writes to the database, so all application logs appear in the web UI.
+	level := slog.LevelInfo
+	if cfg.Debug {
+		level = slog.LevelDebug
+	}
+	logHandler := database.NewDBHandler(db, level)
+	slog.SetDefault(slog.New(logHandler))
 
 	mgr := manager.New(db)
 	if err := mgr.Load(); err != nil {
@@ -68,11 +78,12 @@ func New(cfg *config.ServerConfig) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:      cfg,
-		db:       db,
-		mgr:      mgr,
-		tmpl:     tmpl,
-		staticFS: http.FileServer(staticFS),
+		cfg:        cfg,
+		db:         db,
+		mgr:        mgr,
+		tmpl:       tmpl,
+		staticFS:   http.FileServer(staticFS),
+		logHandler: logHandler,
 	}
 	s.mcp = mcp.NewMCPBridge(mgr, cfg.DashboardURL())
 	s.mux = s.buildMux()
@@ -110,6 +121,7 @@ func (s *Server) buildMux() http.Handler {
 	mux.HandleFunc("GET /{$}", s.dashboardPage)
 	mux.HandleFunc("GET /audit", s.auditPage)
 	mux.HandleFunc("GET /guide", s.guidePage)
+	mux.HandleFunc("GET /logs", s.logPage)
 
 	// Static files.
 	mux.Handle("GET /static/", http.StripPrefix("/static/", s.staticFS))
@@ -158,6 +170,17 @@ func (s *Server) guidePage(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "base.gohtml", data); err != nil {
 		slog.Error("渲染使用指南失败", "err", err)
+	}
+}
+
+// logPage renders the server log viewer HTML page.
+func (s *Server) logPage(w http.ResponseWriter, r *http.Request) {
+	data := map[string]any{
+		"DashboardURL": s.cfg.DashboardURL(),
+		"ActivePage":   "logs",
+	}
+	if err := s.tmpl.ExecuteTemplate(w, "base.gohtml", data); err != nil {
+		slog.Error("渲染日志页失败", "err", err)
 	}
 }
 
@@ -211,8 +234,9 @@ func (s *Server) Run() error {
 	}
 
 	s.mgr.Close()
-	s.db.Close()
 	slog.Info("服务已停止")
+	s.logHandler.Shutdown()
+	s.db.Close()
 	return nil
 }
 

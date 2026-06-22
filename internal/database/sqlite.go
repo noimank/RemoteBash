@@ -69,6 +69,17 @@ func migrate(db *sql.DB) error {
 
 	CREATE INDEX IF NOT EXISTS idx_audit_client ON audit_log(client_name);
 	CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
+
+	CREATE TABLE IF NOT EXISTS server_log (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		level TEXT NOT NULL DEFAULT 'INFO',
+		message TEXT NOT NULL DEFAULT '',
+		attrs TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL DEFAULT (datetime('now'))
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_log_level ON server_log(level);
+	CREATE INDEX IF NOT EXISTS idx_log_created ON server_log(created_at);
 	`
 	_, err := db.Exec(schema)
 	return err
@@ -260,6 +271,83 @@ func DeleteAuditByClient(db *sql.DB, clientName string) (int64, error) {
 // DeleteAuditBeforeID deletes all audit entries with id < beforeID.
 func DeleteAuditBeforeID(db *sql.DB, beforeID int) (int64, error) {
 	r, err := db.Exec("DELETE FROM audit_log WHERE id < ?", beforeID)
+	if err != nil {
+		return 0, err
+	}
+	return r.RowsAffected()
+}
+
+// ── Server Log ─────────────────────────────────────────────────────────
+
+// InsertLog writes a server log entry to the database.
+func InsertLog(db *sql.DB, level, message, attrs string) error {
+	_, err := db.Exec(`INSERT INTO server_log (level, message, attrs, created_at)
+		VALUES (?, ?, ?, datetime('now'))`, level, message, attrs)
+	return err
+}
+
+// QueryLog returns paginated log entries with optional level and time filters.
+func QueryLog(db *sql.DB, level *string, after, before *string,
+	limit, offset int) ([]models.LogEntry, error) {
+
+	conditions, args := buildLogConditions(level, after, before)
+	query := "SELECT id, level, message, attrs, created_at FROM server_log"
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+	args = append(args, limit, offset)
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries = make([]models.LogEntry, 0)
+	for rows.Next() {
+		var e models.LogEntry
+		if err := rows.Scan(&e.ID, &e.Level, &e.Message, &e.Attrs, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// CountLog returns the total number of matching log entries.
+func CountLog(db *sql.DB, level *string, after, before *string) (int, error) {
+	conditions, args := buildLogConditions(level, after, before)
+	query := "SELECT COUNT(*) FROM server_log"
+	if len(conditions) > 0 {
+		query += " WHERE " + strings.Join(conditions, " AND ")
+	}
+	var count int
+	err := db.QueryRow(query, args...).Scan(&count)
+	return count, err
+}
+
+func buildLogConditions(level *string, after, before *string) ([]string, []any) {
+	var conditions []string
+	var args []any
+	if level != nil && *level != "" {
+		conditions = append(conditions, "level=?")
+		args = append(args, *level)
+	}
+	if after != nil && *after != "" {
+		conditions = append(conditions, "created_at>=?")
+		args = append(args, isoToSQLite(*after))
+	}
+	if before != nil && *before != "" {
+		conditions = append(conditions, "created_at<?")
+		args = append(args, isoToSQLite(*before))
+	}
+	return conditions, args
+}
+
+// DeleteLogBeforeID deletes all log entries with id < beforeID.
+func DeleteLogBeforeID(db *sql.DB, beforeID int) (int64, error) {
+	r, err := db.Exec("DELETE FROM server_log WHERE id < ?", beforeID)
 	if err != nil {
 		return 0, err
 	}

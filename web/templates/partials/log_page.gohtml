@@ -1,0 +1,59 @@
+{{define "log_page"}}
+<main class="max-w-7xl mx-auto px-6 py-8 h-[calc(100vh-4rem)] flex flex-col">
+  <section class="bg-surface-raised border border-border rounded-2xl p-6 flex flex-col flex-1 min-h-0">
+    <h2 class="text-base font-semibold mb-4 flex items-center gap-2 shrink-0">
+      <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+      运行日志
+      <span id="totalCount" class="text-xs text-muted font-normal ml-1"></span>
+      <div class="flex items-center gap-1 ml-auto" id="pollingGroup">
+        <select id="pollInterval" onchange="setPollInterval(this.value)" class="rounded-md bg-surface border border-border px-1.5 py-1 text-[10px] text-gray-300 focus:outline-none focus:ring-1 focus:ring-accent/50 focus:border-accent" title="轮询间隔">
+          <option value="3000" selected>3s</option>
+          <option value="5000">5s</option>
+          <option value="10000">10s</option>
+          <option value="30000">30s</option>
+          <option value="60000">60s</option>
+        </select>
+        <button type="button" id="pollToggleBtn" onclick="togglePolling()" class="rounded-md border border-border hover:border-accent text-muted hover:text-white text-[10px] px-2 py-1 transition-colors font-medium flex items-center gap-1" title="自动刷新">
+          <span id="pollDot" class="w-1.5 h-1.5 rounded-full bg-muted shrink-0"></span>
+          轮询刷新
+        </button>
+      </div>
+    </h2>
+    <div class="flex flex-wrap items-center gap-3 mb-4 shrink-0 bg-surface rounded-xl border border-border p-3">
+      <div class="flex items-center gap-1.5">
+        <svg class="w-3.5 h-3.5 text-muted shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/></svg>
+        <select id="filterLevel" class="rounded-lg bg-surface border border-border px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent min-w-[120px]">
+          <option value="">全部级别</option>
+          <option value="DEBUG">DEBUG</option>
+          <option value="INFO">INFO</option>
+          <option value="WARN">WARN</option>
+          <option value="ERROR">ERROR</option>
+        </select>
+      </div>
+      <span class="text-border">|</span>
+      <div class="flex items-center gap-2">
+        <input type="datetime-local" id="filterAfter"
+          class="rounded-lg bg-surface border border-border px-2.5 py-2 text-xs font-mono text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent w-[190px]"
+          title="起始时间（含）" placeholder="起始时间">
+        <span class="text-muted text-xs select-none">至</span>
+        <input type="datetime-local" id="filterBefore"
+          class="rounded-lg bg-surface border border-border px-2.5 py-2 text-xs font-mono text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent w-[190px]"
+          title="结束时间（不含）" placeholder="结束时间">
+      </div>
+      <button type="button" onclick="refreshLogs()" class="rounded-lg bg-accent hover:bg-accent-hover text-white text-xs px-4 py-2 transition-colors font-medium">筛选</button>
+      <button type="button" onclick="clearFilters()" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium">重置</button>
+      <button type="button" onclick="clearLogs()" class="rounded-lg border border-red/30 hover:bg-red/10 text-red text-xs px-3 py-1.5 transition-colors font-medium ml-auto">清除日志</button>
+    </div>
+    <div id="logList" class="space-y-0.5 flex-1 overflow-y-auto min-h-0">
+      <div class="text-center py-12 text-muted text-sm">暂无日志记录。</div>
+    </div>
+    <div class="flex items-center justify-between mt-4 pt-4 border-t border-border shrink-0">
+      <span id="pageInfo" class="text-xs text-muted"></span>
+      <div class="flex gap-2">
+        <button onclick="prevPage()" id="prevBtn" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium">&#8592; 上一页</button>
+        <button onclick="nextPage()" id="nextBtn" class="rounded-lg border border-border hover:border-accent text-muted hover:text-white text-xs px-3 py-1.5 transition-colors font-medium">下一页 &#8594;</button>
+      </div>
+    </div>
+  </section>
+</main>
+{{end}}

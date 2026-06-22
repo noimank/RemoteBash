@@ -144,6 +144,23 @@ type WebSocketResize struct {
 	Rows int    `json:"rows"`
 }
 
+// LogEntry is a single application log record.
+type LogEntry struct {
+	ID        int    `json:"id"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	Attrs     string `json:"attrs"`
+	CreatedAt string `json:"created_at"`
+}
+
+// LogListResponse is the paginated log query result.
+type LogListResponse struct {
+	Entries []LogEntry `json:"entries"`
+	Total   int        `json:"total"`
+	Limit   int        `json:"limit"`
+	Offset  int        `json:"offset"`
+}
+
 // ErrorResponse is a standard JSON error envelope.
 // Name is set only when the operation partially succeeded (e.g. a client was
 // persisted but its auto-connect failed), so the frontend can refresh the list.
