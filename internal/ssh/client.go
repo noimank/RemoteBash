@@ -1,6 +1,7 @@
 package ssh
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -29,17 +30,17 @@ type RemoteSession struct {
 	SafeRm   bool
 	Via      string // jump host client name, empty = direct
 
-	conn            *gossh.Client
-	shell           *PersistentShell // MCP exec shell
-	shellType       string           // detected remote shell (ash, bash, ...)
-	shellLock       sync.Mutex       // guards EnsureShell
-	execLock        sync.Mutex       // serialises concurrent Exec callers
-	connectLock     sync.Mutex       // guards Connect against TOCTOU races
-	disconnectLock  sync.Mutex       // serialises Disconnect calls
-	cwd             string
-	auditCb         AuditCallback
-	tunnelResolver  TunnelResolver // callable: name → *gossh.Client
-	relay           *SocatTunnelRelay
+	conn           *gossh.Client
+	shell          *PersistentShell // MCP exec shell
+	shellType      string           // detected remote shell (ash, bash, ...)
+	shellLock      sync.Mutex       // guards EnsureShell
+	execLock       sync.Mutex       // serialises concurrent Exec callers
+	connectLock    sync.Mutex       // guards Connect against TOCTOU races
+	disconnectLock sync.Mutex       // serialises Disconnect calls
+	cwd            string
+	auditCb        AuditCallback
+	tunnelResolver TunnelResolver // callable: name → *gossh.Client
+	relay          *SocatTunnelRelay
 }
 
 // AuditCallback is called after every command execution.
@@ -95,8 +96,8 @@ func (s *RemoteSession) Connect() error {
 	}
 
 	config := &gossh.ClientConfig{
-		User: s.User,
-		Auth: []gossh.AuthMethod{gossh.Password(s.Password)},
+		User:            s.User,
+		Auth:            []gossh.AuthMethod{gossh.Password(s.Password)},
 		HostKeyCallback: hostKeyLogger(s.Name),
 		Timeout:         10 * time.Second,
 	}
@@ -265,7 +266,12 @@ func (s *RemoteSession) Exec(command string, timeout time.Duration) (*CommandOut
 }
 
 // Transfer performs an SFTP file transfer.
-func (s *RemoteSession) Transfer(src, dst, direction string) (*TransferOutput, error) {
+//
+// ctx controls cancellation/timeout: on ctx.Done the open file handles are
+// closed to unblock stalled SFTP I/O, and the copy returns a cancellation
+// error. Uploads use pipelined (concurrent) SFTP writes for throughput on
+// high-latency links; downloads already use concurrent reads by default.
+func (s *RemoteSession) Transfer(ctx context.Context, src, dst, direction string) (*TransferOutput, error) {
 	if err := s.Connect(); err != nil {
 		return nil, err
 	}
@@ -279,64 +285,141 @@ func (s *RemoteSession) Transfer(src, dst, direction string) (*TransferOutput, e
 
 	t0 := time.Now()
 
-	// Open SFTP session over the SSH client.
-	sftpClient, err := sftp.NewClient(s.conn)
+	// Open SFTP session over the SSH client. Concurrent writes pipeline write
+	// packets — the main throughput win for uploads over WAN links.
+	sftpClient, err := sftp.NewClient(s.conn, sftp.UseConcurrentWrites(true))
 	if err != nil {
 		return nil, fmt.Errorf("sftp session: %w", err)
 	}
 	defer sftpClient.Close()
 
-	var size int64
+	// Total size drives progress percentage (best-effort).
+	var total int64
 	switch direction {
 	case "remote2local":
-		// Download: remote src → local dst.
-		if err := sftpDownload(sftpClient, src, dst); err != nil {
-			s.Disconnect()
-			return nil, fmt.Errorf("sftp download: %w", err)
-		}
-		// Best-effort stat the remote file for size reporting.
-		st, statErr := sftpClient.Stat(src)
-		if statErr == nil {
-			size = st.Size()
+		if st, statErr := sftpClient.Stat(src); statErr == nil {
+			total = st.Size()
 		}
 	case "local2remote":
-		// Upload: local src → remote dst.
-		if err := sftpUpload(sftpClient, src, dst); err != nil {
-			s.Disconnect()
-			return nil, fmt.Errorf("sftp upload: %w", err)
-		}
-		st, statErr := sftpClient.Stat(dst)
-		if statErr == nil {
-			size = st.Size()
+		if st, statErr := os.Stat(src); statErr == nil {
+			total = st.Size()
 		}
 	default:
 		return nil, fmt.Errorf("invalid direction '%s', expected 'remote2local' or 'local2remote'", direction)
 	}
 
-	elapsed := int(time.Since(t0).Milliseconds())
-	slog.Info("传输完成", "src", src, "dst", dst, "direction", direction, "duration_ms", elapsed, "bytes", size)
+	// Open source/destination handles per direction.
+	var (
+		srcReader io.Reader
+		dstWriter io.Writer
+		srcCloser io.Closer
+		dstCloser io.Closer
+	)
+	switch direction {
+	case "remote2local":
+		remoteFile, e := sftpClient.Open(src)
+		if e != nil {
+			return nil, fmt.Errorf("open remote file: %w", e)
+		}
+		localFile, e := os.Create(dst)
+		if e != nil {
+			remoteFile.Close()
+			return nil, fmt.Errorf("create local file: %w", e)
+		}
+		srcReader, srcCloser = remoteFile, remoteFile
+		dstWriter, dstCloser = localFile, localFile
+	case "local2remote":
+		localFile, e := os.Open(src)
+		if e != nil {
+			return nil, fmt.Errorf("open local file: %w", e)
+		}
+		remoteFile, e := sftpClient.Create(dst)
+		if e != nil {
+			localFile.Close()
+			return nil, fmt.Errorf("create remote file: %w", e)
+		}
+		srcReader, srcCloser = localFile, localFile
+		dstWriter, dstCloser = remoteFile, remoteFile
+	}
+	defer srcCloser.Close()
+	defer dstCloser.Close()
+
+	// progressWriter wraps the destination so io.Copy streams through it in
+	// both directions (upload via the generic copy loop, download via the
+	// remote file's WriteTo, which calls our Write).
+	pw := &progressWriter{
+		w:         dstWriter,
+		total:     total,
+		start:     t0,
+		lastLogAt: t0,
+		client:    s.Name,
+		dir:       direction,
+	}
+
+	// On ctx cancellation close both handles to unblock stalled SFTP I/O.
+	// This tears down only the SFTP files (a channel-level op), not the SSH
+	// connection — a parallel Exec on the same session keeps running.
+	cancelStop := context.AfterFunc(ctx, func() {
+		srcCloser.Close()
+		dstCloser.Close()
+	})
+	defer cancelStop()
+
+	// 1 MiB copy buffer feeds the SFTP writer more data per round-trip than
+	// io.Copy's default 32 KiB.
+	buf := make([]byte, 1024*1024)
+	if _, err := io.CopyBuffer(pw, srcReader, buf); err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("sftp transfer cancelled: %w", ctxErr)
+		}
+		return nil, fmt.Errorf("sftp %s: %w", direction, err)
+	}
+
+	// Best-effort stat the remote file for size reporting.
+	var size int64
+	remoteStatPath := src
+	if direction == "local2remote" {
+		remoteStatPath = dst
+	}
+	if st, statErr := sftpClient.Stat(remoteStatPath); statErr == nil {
+		size = st.Size()
+	}
+
+	elapsed := time.Since(t0)
+	elapsedMs := int(elapsed.Milliseconds())
+	var bps int64
+	if elapsed > 0 {
+		bps = int64(float64(size) / elapsed.Seconds())
+	}
+	slog.Info("传输完成",
+		"src", src, "dst", dst, "direction", direction,
+		"bytes", size, "duration_ms", elapsedMs,
+		"rate_mibs", fmt.Sprintf("%.2f", float64(bps)/(1024*1024)),
+	)
 	return &TransferOutput{
-		Success:    true,
-		Direction:  direction,
-		Src:        src,
-		Dst:        dst,
-		SizeBytes:  size,
-		DurationMs: elapsed,
+		Success:     true,
+		Direction:   direction,
+		Src:         src,
+		Dst:         dst,
+		SizeBytes:   size,
+		DurationMs:  elapsedMs,
+		BytesPerSec: bps,
 	}, nil
 }
 
 // TransferOutput is the result of an SFTP transfer.
 type TransferOutput struct {
-	Success    bool
-	Direction  string
-	Src        string
-	Dst        string
-	SizeBytes  int64
-	DurationMs int
+	Success     bool
+	Direction   string
+	Src         string
+	Dst         string
+	SizeBytes   int64
+	DurationMs  int
+	BytesPerSec int64
 }
 
 // ExecLock acquires the exec lock (used by Manager during shutdown).
-func (s *RemoteSession) ExecLock()  { s.execLock.Lock() }
+func (s *RemoteSession) ExecLock() { s.execLock.Lock() }
 
 // ExecUnlock releases the exec lock.
 func (s *RemoteSession) ExecUnlock() { s.execLock.Unlock() }
@@ -406,38 +489,58 @@ func (s *RemoteSession) ToInfo() models.ClientInfo {
 
 // ── SFTP helpers ─────────────────────────────────────────────────────
 
-func sftpDownload(client *sftp.Client, remotePath, localPath string) error {
-	srcFile, err := client.Open(remotePath)
-	if err != nil {
-		return fmt.Errorf("open remote file: %w", err)
-	}
-	defer srcFile.Close()
+const (
+	// progressBytesInterval logs progress at least every 64 MiB transferred.
+	progressBytesInterval = 64 * 1024 * 1024
+	// progressTimeInterval also logs progress every 10s, so slow transfers
+	// of files smaller than 64 MiB stay visible.
+	progressTimeInterval = 10 * time.Second
+)
 
-	dstFile, err := os.Create(localPath)
-	if err != nil {
-		return fmt.Errorf("create local file: %w", err)
-	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
-	return err
+// progressWriter wraps an io.Writer and logs transfer progress at regular
+// byte/time intervals. Only the bytes that flow through the destination are
+// counted, which for SFTP is the full payload in both directions.
+type progressWriter struct {
+	w            io.Writer
+	written      int64
+	total        int64
+	start        time.Time
+	client       string
+	dir          string
+	lastLogBytes int64
+	lastLogAt    time.Time
 }
 
-func sftpUpload(client *sftp.Client, localPath, remotePath string) error {
-	srcFile, err := os.Open(localPath)
-	if err != nil {
-		return fmt.Errorf("open local file: %w", err)
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n, err := pw.w.Write(p)
+	pw.written += int64(n)
+	if pw.total <= 0 {
+		return n, err
 	}
-	defer srcFile.Close()
-
-	dstFile, err := client.Create(remotePath)
-	if err != nil {
-		return fmt.Errorf("create remote file: %w", err)
+	if pw.written-pw.lastLogBytes >= progressBytesInterval ||
+		time.Since(pw.lastLogAt) >= progressTimeInterval {
+		pw.log()
+		pw.lastLogBytes = pw.written
+		pw.lastLogAt = time.Now()
 	}
-	defer dstFile.Close()
+	return n, err
+}
 
-	_, err = io.Copy(dstFile, srcFile)
-	return err
+func (pw *progressWriter) log() {
+	elapsed := time.Since(pw.start).Seconds()
+	pct := float64(pw.written) / float64(pw.total) * 100
+	var rateMiB float64
+	if elapsed > 0 {
+		rateMiB = float64(pw.written) / elapsed / (1024 * 1024)
+	}
+	slog.Info("传输进度",
+		"client", pw.client,
+		"direction", pw.dir,
+		"read_bytes", pw.written,
+		"total_bytes", pw.total,
+		"pct", fmt.Sprintf("%.1f", pct),
+		"rate_mibs", fmt.Sprintf("%.2f", rateMiB),
+	)
 }
 
 // hostKeyLogger returns a host key callback that logs unknown keys

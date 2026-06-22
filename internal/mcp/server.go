@@ -155,7 +155,7 @@ func (b *MCPBridge) registerTools() {
 	toolDT := mcp.NewTool("data_transfer",
 		mcp.WithDescription(
 			"Transfer files between this server and a remote host via SFTP. "+
-				"Returns {success, direction, src, dst, size_bytes, duration_ms}."),
+				"Returns {success, direction, src, dst, size_bytes, duration_ms, bytes_per_sec}."),
 		mcp.WithString("client_name",
 			mcp.Required(),
 			mcp.Description("Remote host name from list_remote_clients."),
@@ -206,7 +206,7 @@ func (b *MCPBridge) registerTools() {
 		cmdSummary := fmt.Sprintf("[SFTP %s] %s → %s", directionLabel, src, dst)
 
 		t0 := time.Now()
-		result, err := sess.Transfer(src, dst, direction)
+		result, err := sess.Transfer(ctx, src, dst, direction)
 		if err != nil {
 			elapsed := int(time.Since(t0).Milliseconds())
 			b.mgr.LogAudit(clientName, cmdSummary,
@@ -215,17 +215,18 @@ func (b *MCPBridge) registerTools() {
 		}
 
 		b.mgr.LogAudit(clientName, cmdSummary,
-			fmt.Sprintf("success: true\nsrc: %s\ndst: %s\nsize_bytes: %d\nduration_ms: %d",
-				result.Src, result.Dst, result.SizeBytes, result.DurationMs),
+			fmt.Sprintf("success: true\nsrc: %s\ndst: %s\nsize_bytes: %d\nduration_ms: %d\nbytes_per_sec: %d",
+				result.Src, result.Dst, result.SizeBytes, result.DurationMs, result.BytesPerSec),
 			0, direction, result.DurationMs, true)
 
 		output := models.MCPDataTransferOutput{
-			Success:    result.Success,
-			Direction:  result.Direction,
-			Src:        result.Src,
-			Dst:        result.Dst,
-			SizeBytes:  result.SizeBytes,
-			DurationMs: result.DurationMs,
+			Success:     result.Success,
+			Direction:   result.Direction,
+			Src:         result.Src,
+			Dst:         result.Dst,
+			SizeBytes:   result.SizeBytes,
+			DurationMs:  result.DurationMs,
+			BytesPerSec: result.BytesPerSec,
 		}
 		return mcpResult(output)
 	})

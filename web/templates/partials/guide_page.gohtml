@@ -92,16 +92,18 @@
 
     <!-- Codex -->
     <div class="tab-panel space-y-3 hidden" data-panel="codex">
-      <p class="text-xs text-muted leading-relaxed">编辑 <code class="text-gray-300">~/.codex/config.toml</code>（用户级）或项目内 <code class="text-gray-300">.codex/config.toml</code>。Codex 通过 <code class="text-gray-300">url</code> 字段支持流式 HTTP，需 Codex <code class="text-gray-300">0.34.0+</code>。</p>
+      {{template "guide_config"(printf "# 添加（写入 ~/.codex/config.toml）\ncodex mcp add remotebash --url %s/mcp\n\n# 查看已接入\ncodex mcp list\n\n# 删除\ncodex mcp remove remotebash" .DashboardURL)}}
+      <p class="text-xs text-muted leading-relaxed pt-1">或手动编辑 <code class="text-gray-300">~/.codex/config.toml</code>（用户级）或项目内 <code class="text-gray-300">.codex/config.toml</code>。Codex 通过 <code class="text-gray-300">url</code> 字段支持流式 HTTP，需 Codex <code class="text-gray-300">0.34.0+</code>。</p>
       {{template "guide_config"(printf "# ~/.codex/config.toml\n[mcp_servers.remotebash]\nurl = \"%s/mcp\"" .DashboardURL)}}
-      <p class="text-xs text-muted leading-relaxed pt-1">Codex 无 <code class="text-gray-300">mcp add</code> 命令，增删均改此文件：<span class="text-gray-200">添加</span>＝追加上面的段；<span class="text-gray-200">删除/禁用</span>＝删掉该段，或在段内加 <code class="text-gray-300">enabled = false</code>。长耗时命令可追加 <code class="text-gray-300">startup_timeout_sec</code> / <code class="text-gray-300">tool_timeout_sec</code>。</p>
+      <p class="text-xs text-muted leading-relaxed pt-1">长耗时命令可在段内追加 <code class="text-gray-300">startup_timeout_sec</code> / <code class="text-gray-300">tool_timeout_sec</code>；禁用＝加 <code class="text-gray-300">enabled = false</code>。</p>
     </div>
 
     <!-- OpenCode -->
     <div class="tab-panel space-y-3 hidden" data-panel="opencode">
-      <p class="text-xs text-muted leading-relaxed">在项目根目录的 <code class="text-gray-300">opencode.json</code>（团队共享）或全局 <code class="text-gray-300">~/.config/opencode/opencode.json</code> 的 <code class="text-gray-300">mcp</code> 下添加。流式 HTTP 与 SSE 统一用 <code class="text-gray-300">"type": "remote"</code>。</p>
+      {{template "guide_config"(printf "# 交互式添加（按提示选择 Remote / Streaming HTTP）\nopencode mcp add\n#   Name: remotebash\n#   URL:  %s/mcp\n\n# 查看状态\nopencode mcp auth list\n\n# 排查连接\nopencode mcp debug remotebash" .DashboardURL)}}
+      <p class="text-xs text-muted leading-relaxed pt-1">或手动编辑项目根目录 <code class="text-gray-300">opencode.json</code>（团队共享）或全局 <code class="text-gray-300">~/.config/opencode/opencode.json</code> 的 <code class="text-gray-300">mcp</code> 下添加。流式 HTTP 与 SSE 统一用 <code class="text-gray-300">"type": "remote"</code>。</p>
       {{template "guide_config"(printf "{\n  \"$schema\": \"https://opencode.ai/config.json\",\n  \"mcp\": {\n    \"remotebash\": {\n      \"type\": \"remote\",\n      \"url\": \"%s/mcp\",\n      \"enabled\": true\n    }\n  }\n}" .DashboardURL)}}
-      <p class="text-xs text-muted leading-relaxed pt-1"><span class="text-gray-200">删除/禁用</span>＝删掉该项，或设 <code class="text-gray-300">"enabled": false</code>。排查连接用 <code class="text-gray-300">opencode mcp debug remotebash</code>，查看状态用 <code class="text-gray-300">opencode mcp auth list</code>。</p>
+      <p class="text-xs text-muted leading-relaxed pt-1"><span class="text-gray-200">删除/禁用</span>＝删掉该项，或设 <code class="text-gray-300">"enabled": false</code>。</p>
     </div>
 
     <!-- Gemini CLI -->
@@ -194,7 +196,7 @@
           <code class="text-sm font-mono text-accent">data_transfer</code>
           <span class="text-[10px] text-muted bg-surface-overlay px-1.5 py-0.5 rounded">client_name · src · dst · direction?</span>
         </div>
-        <p class="text-xs text-muted leading-relaxed">通过 SFTP 在本机与远程主机之间传输文件。<code class="text-gray-300">direction</code> 取 <code class="text-gray-300">local2remote</code>（默认，上传）或 <code class="text-gray-300">remote2local</code>（下载）。返回 <code class="text-gray-300">{success, direction, src, dst, size_bytes, duration_ms}</code>。</p>
+        <p class="text-xs text-muted leading-relaxed">通过 SFTP 在本机与远程主机之间传输文件。<code class="text-gray-300">direction</code> 取 <code class="text-gray-300">local2remote</code>（默认，上传）或 <code class="text-gray-300">remote2local</code>（下载）。返回 <code class="text-gray-300">{success, direction, src, dst, size_bytes, duration_ms, bytes_per_sec}</code>。</p>
       </div>
     </div>
   </section>

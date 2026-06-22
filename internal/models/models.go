@@ -44,14 +44,14 @@ type RemoteClientInfo struct {
 
 // ClientRequest is the JSON body for adding/updating a client.
 type ClientRequest struct {
-	Name    string `json:"name"`
-	Host    string `json:"host"`
-	User    string `json:"user"`
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	User     string `json:"user"`
 	Password string `json:"password"`
-	Port    int    `json:"port"`
-	Enabled *bool  `json:"enabled,omitempty"`
-	SafeRm  *bool  `json:"safe_rm,omitempty"`
-	Via     string `json:"via,omitempty"`
+	Port     int    `json:"port"`
+	Enabled  *bool  `json:"enabled,omitempty"`
+	SafeRm   *bool  `json:"safe_rm,omitempty"`
+	Via      string `json:"via,omitempty"`
 	// AutoConnect controls whether add also performs an immediate connect test.
 	AutoConnect *bool `json:"auto_connect,omitempty"`
 }
@@ -104,12 +104,13 @@ type CommandResult struct {
 
 // TransferResult is the output of an SFTP file transfer.
 type TransferResult struct {
-	Success    bool   `json:"success"`
-	Direction  string `json:"direction"`
-	Src        string `json:"src"`
-	Dst        string `json:"dst"`
-	SizeBytes  int64  `json:"size_bytes"`
-	DurationMs int    `json:"duration_ms"`
+	Success     bool   `json:"success"`
+	Direction   string `json:"direction"`
+	Src         string `json:"src"`
+	Dst         string `json:"dst"`
+	SizeBytes   int64  `json:"size_bytes"`
+	DurationMs  int    `json:"duration_ms"`
+	BytesPerSec int64  `json:"bytes_per_sec"`
 }
 
 // MCPRemoteBashOutput is the MCP remote_shell tool return shape.
@@ -121,12 +122,13 @@ type MCPRemoteBashOutput struct {
 
 // MCPDataTransferOutput is the MCP data_transfer tool return shape.
 type MCPDataTransferOutput struct {
-	Success    bool   `json:"success"`
-	Direction  string `json:"direction"`
-	Src        string `json:"src"`
-	Dst        string `json:"dst"`
-	SizeBytes  int64  `json:"size_bytes"`
-	DurationMs int    `json:"duration_ms"`
+	Success     bool   `json:"success"`
+	Direction   string `json:"direction"`
+	Src         string `json:"src"`
+	Dst         string `json:"dst"`
+	SizeBytes   int64  `json:"size_bytes"`
+	DurationMs  int    `json:"duration_ms"`
+	BytesPerSec int64  `json:"bytes_per_sec"`
 }
 
 // WebSocketStatus is a JSON status message sent over the terminal websocket.
