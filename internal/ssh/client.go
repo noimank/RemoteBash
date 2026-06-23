@@ -38,7 +38,8 @@ type RemoteSession struct {
 	connectLock    sync.Mutex       // guards Connect against TOCTOU races
 	disconnectLock sync.Mutex       // serialises Disconnect calls
 	cwd            string
-	homeCache      string // cached remote $HOME, valid for session lifetime
+	homeCache      string            // cached remote $HOME, valid for session lifetime
+	keepaliveDone  chan struct{}     // closed by stopKeepalive to terminate the keepalive goroutine
 	auditCb        AuditCallback
 	tunnelResolver TunnelResolver // callable: name → *gossh.Client
 	relay          *SocatTunnelRelay
@@ -70,6 +71,64 @@ func (s *RemoteSession) Connected() bool {
 	return s.conn != nil
 }
 
+// ── SSH keepalive ──────────────────────────────────────────────────────
+
+// startKeepalive launches a background goroutine that sends
+// keepalive@openssh.com requests every 30 seconds, preventing NAT
+// gateways, firewalls, and sshd ServerAliveCountMax timers from killing
+// idle connections.  Must only be called when s.conn is non-nil.
+func (s *RemoteSession) startKeepalive() {
+	s.keepaliveDone = make(chan struct{})
+	go s.keepaliveLoop()
+}
+
+// stopKeepalive signals the keepalive goroutine to exit.  Safe to call
+// even if the goroutine is not running (nil keepaliveDone).
+func (s *RemoteSession) stopKeepalive() {
+	if s.keepaliveDone == nil {
+		return
+	}
+	select {
+	case <-s.keepaliveDone:
+		// already closed
+	default:
+		close(s.keepaliveDone)
+	}
+}
+
+func (s *RemoteSession) keepaliveLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			// Snapshot conn pointer under disconnectLock so we don't race
+			// with Disconnect() zeroing it.
+			s.disconnectLock.Lock()
+			conn := s.conn
+			s.disconnectLock.Unlock()
+			if conn == nil {
+				return
+			}
+			if _, _, err := conn.SendRequest("keepalive@openssh.com", true, nil); err != nil {
+				// If keepaliveDone was closed while we were blocked on
+				// SendRequest, Connect() or Disconnect() is replacing the
+				// session — bail out instead of calling Disconnect().
+				select {
+				case <-s.keepaliveDone:
+					return
+				default:
+				}
+				slog.Warn("SSH keepalive 丢失，断开连接", "client", s.Name, "err", err)
+				s.Disconnect()
+				return
+			}
+		case <-s.keepaliveDone:
+			return
+		}
+	}
+}
+
 // RawConn returns the underlying *gossh.Client, used for tunnel resolution.
 func (s *RemoteSession) RawConn() *gossh.Client {
 	return s.conn
@@ -95,6 +154,17 @@ func (s *RemoteSession) Connect() error {
 	if s.Connected() {
 		return nil
 	}
+
+	s.stopKeepalive()
+
+	// If we successfully set s.conn below, the keepalive goroutine keeps the
+	// encrypted tunnel alive across idle periods — NAT gateways, firewalls,
+	// and SSH ServerAliveCountMax timers all kill truly idle connections.
+	defer func() {
+		if s.conn != nil {
+			s.startKeepalive()
+		}
+	}()
 
 	config := &gossh.ClientConfig{
 		User:            s.User,
@@ -185,6 +255,7 @@ func (s *RemoteSession) Disconnect() {
 		s.conn.Close()
 		s.conn = nil
 	}
+	s.stopKeepalive()
 	if s.relay != nil {
 		s.relay.Close()
 		s.relay = nil

@@ -316,8 +316,11 @@ func (s *PersistentShell) readerLoop() {
 		}
 	}
 
-	// If a command is still outstanding, fail it.
+	// Mark the shell dead so Alive() stops lying.  Without this, callers reuse
+	// a shell whose PTY died (e.g. idle SSH timeout) and FeedRaw fails with
+	// "PTY 写入失败" on the next keystroke.
 	s.mu.Lock()
+	s.closed = true
 	if s.pending != nil {
 		select {
 		case s.pending.result <- cmdResult{err: fmt.Errorf("remote shell closed before command finished")}:
