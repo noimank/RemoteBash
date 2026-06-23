@@ -104,7 +104,7 @@ function renderClient(c) {
   return `
     <div class="flex items-center gap-4 py-3.5 px-2 border-b border-border last:border-b-0 flex-wrap hover:bg-surface/50 rounded-lg transition-colors -mx-2">
       ${statusDot(c.connected, c.enabled)}
-      <code onclick="copyName('${js(c.name)}')" class="text-accent text-[13px] font-mono w-[8.4rem] shrink-0 cursor-pointer hover:underline" title="点击复制名称">${c.name}</code>
+      <code onclick="copyName('${js(c.name)}')" class="text-accent text-[13px] font-mono shrink-0 cursor-pointer hover:underline whitespace-nowrap" title="点击复制名称">${c.name}</code>
       <span class="font-medium text-sm min-w-[140px]">${c.host}:${c.port}</span>
       <span class="text-muted text-xs">${c.user}</span>
       <span class="text-muted text-xs max-w-[200px] truncate" title="${c.cwd || "~"}">${c.cwd || "~"}</span>
