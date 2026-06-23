@@ -410,7 +410,7 @@ func (s *RemoteSession) EnsureShell() (*PersistentShell, error) {
 		initScript = SafeRmShim
 	}
 
-	shell := NewPersistentShell(conn, defaultCols, defaultRows, s.SafeRm, initScript, "")
+	shell := NewPersistentShell(conn, mcpShellCols, defaultRows, s.SafeRm, initScript, "")
 	if err := shell.Start(); err != nil {
 		return nil, fmt.Errorf("start mcp shell: %w", err)
 	}

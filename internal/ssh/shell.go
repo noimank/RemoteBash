@@ -23,6 +23,13 @@ const (
 	defaultCols = 200
 	defaultRows = 50
 	readChunk   = 4096
+
+	// mcpShellCols is the PTY width for the MCP exec shell. The kernel PTY
+	// never inserts output-side wraps (only ONLCR), so raw cat/echo output is
+	// width-independent; but programs that probe the terminal width and lay
+	// out to it (ls columns, ps/table width, text wrappers) produce fewer
+	// ambiguous wraps at a wide width — better fidelity for the agent.
+	mcpShellCols = 1000
 )
 
 // TTY opcode for ECHO (RFC 4254 §8).
@@ -66,6 +73,12 @@ var ansiRe = regexp.MustCompile(
 func StripANSI(data []byte) []byte {
 	return ansiRe.ReplaceAll(data, nil)
 }
+
+// crlfRunRe matches one or more CRs immediately followed by a single LF
+// ('\r\n', '\r\r\n', '\r\r\r\n', …). Collapsing the whole run to one LF
+// prevents a PTY's ONLCR translation from doubling pre-existing CRLF
+// endings (e.g. a Windows text file under `cat`) into blank lines.
+var crlfRunRe = regexp.MustCompile(`\r+\n`)
 
 // ── PersistentShell ───────────────────────────────────────────────────
 
@@ -708,8 +721,15 @@ func normalizeOutput(raw []byte) string {
 	clean = removeBackspaceOverstrikes(clean)
 
 	// Step 4: Normalise line endings.
-	// CRLF → LF; standalone CR (progress bars) → LF.
-	clean = strings.ReplaceAll(clean, "\r\n", "\n")
+	// The remote PTY runs with ONLCR, so every program '\n' arrives as
+	// '\r\n'. When the source itself already uses CRLF (Windows text files,
+	// HTTP-style output, some loggers), ONLCR turns '\r\n' into '\r\r\n'.
+	// The naive '\r\n'→'\n' then '\r'→'\n' two-pass would expand that to TWO
+	// line feeds — the spurious blank lines seen in `cat` output.
+	//
+	// First collapse any CR-run + LF into a single LF, then map any surviving
+	// lone CR (old-Mac endings, progress-bar redraws) to LF.
+	clean = crlfRunRe.ReplaceAllString(clean, "\n")
 	clean = strings.ReplaceAll(clean, "\r", "\n")
 
 	// Step 5: Strip control characters.

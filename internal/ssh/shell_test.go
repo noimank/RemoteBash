@@ -46,6 +46,28 @@ func TestNormalizeOutput_StandaloneCR(t *testing.T) {
 	}
 }
 
+// Regression: a PTY with ONLCR maps every '\n' to '\r\n'. When the source
+// already uses CRLF, ONLCR doubles it to '\r\r\n', which must collapse to a
+// single LF — not two (which would surface as a spurious blank line in cat).
+func TestNormalizeOutput_OnlcrDoubledCRLF(t *testing.T) {
+	raw := []byte("line1\r\r\nline2\r\r\n")
+	got := normalizeOutput(raw)
+	want := "line1\nline2\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeOutput_CRLFMixedWithLoneCR(t *testing.T) {
+	// Plain CRLF, ONLCR-doubled CRLF, and a lone CR (progress redraw) combined.
+	raw := []byte("a\r\nb\r\r\nc\r\rdone")
+	got := normalizeOutput(raw)
+	want := "a\nb\nc\n\ndone"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestNormalizeOutput_Tab(t *testing.T) {
 	raw := []byte("col1\tcol2\tcol3")
 	got := normalizeOutput(raw)
@@ -415,5 +437,21 @@ func TestDonePattern_CRLF(t *testing.T) {
 	clean := shell.cleanOutput(m[1], "echo hello", token)
 	if clean != "hello world" {
 		t.Errorf("cleanOutput = %q, want %q", clean, "hello world")
+	}
+}
+
+// Regression for the "cat prints blank lines" bug: cat of a Windows (CRLF)
+// text file through an ONLCR PTY delivers '\r\r\n' per line. cleanOutput must
+// yield one line per source line, with no inserted blank lines.
+func TestCleanOutput_CatCRLFFile(t *testing.T) {
+	shell := &PersistentShell{}
+	token := "cccccccccccccccccccccccccccccccc"
+	raw := []byte("header row\r\r\n" +
+		"data line 1\r\r\n" +
+		"data line 2\r\r\n")
+	clean := shell.cleanOutput(raw, "cat win.txt", token)
+	want := "header row\ndata line 1\ndata line 2"
+	if clean != want {
+		t.Errorf("cleanOutput = %q, want %q", clean, want)
 	}
 }
