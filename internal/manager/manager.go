@@ -295,32 +295,47 @@ func (m *ConnectionManager) Get(name string) (*ssh.RemoteSession, error) {
 // ── Browser terminals ─────────────────────────────────────────────────
 
 // GetOrCreateTerminal returns a live PersistentShell for the browser terminal.
+// Uses double-checked locking: the write lock is only held for map operations,
+// not during SSH connection establishment which can block for seconds.
 func (m *ConnectionManager) GetOrCreateTerminal(name string) (*ssh.PersistentShell, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	// Fast path: terminal already alive — read lock only.
+	m.mu.RLock()
 	s, exists := m.sessions[name]
 	if !exists {
+		m.mu.RUnlock()
 		return nil, fmt.Errorf("客户端 '%s' 不存在。", name)
 	}
-
 	shell := m.terminals[name]
+	if shell != nil && shell.Alive() && s.Connected() && shell.SafeRmFlag() == s.SafeRm {
+		m.mu.RUnlock()
+		return shell, nil
+	}
+	m.mu.RUnlock()
+
+	// Slow path: terminal is missing, dead, or stale.  Close the old one
+	// outside any lock (Close is idempotent), then create a new one without
+	// holding the manager lock — OpenTerminalShell → Connect can block on
+	// TCP dial for up to 10 s.
 	if shell != nil {
-		if !shell.Alive() || !s.Connected() || shell.SafeRmFlag() != s.SafeRm {
-			shell.Close()
-			shell = nil
-		}
+		shell.Close()
 	}
 
-	if shell == nil {
-		var err error
-		shell, err = s.OpenTerminalShell()
-		if err != nil {
-			return nil, err
-		}
-		m.terminals[name] = shell
+	newShell, err := s.OpenTerminalShell()
+	if err != nil {
+		return nil, err
 	}
-	return shell, nil
+
+	// Install under write lock, but check for a race first.
+	m.mu.Lock()
+	if existing, ok := m.terminals[name]; ok && existing.Alive() {
+		// Another goroutine beat us — discard ours, use theirs.
+		newShell.Close()
+		m.mu.Unlock()
+		return existing, nil
+	}
+	m.terminals[name] = newShell
+	m.mu.Unlock()
+	return newShell, nil
 }
 
 // CloseTerminal tears down a browser terminal shell.

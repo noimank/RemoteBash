@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"remotebash/internal/manager"
@@ -45,27 +46,38 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 
-	sendStatus(ctx, conn, "connecting")
+	// All writes (Write, Ping, Close) must be serialized —
+	// nhooyr.io/websocket requires exclusive write access.
+	var writeMu sync.Mutex
+
+	sendStatus(ctx, conn, &writeMu, "connecting")
 
 	shell, err := h.Mgr.GetOrCreateTerminal(name)
 	if err != nil {
 		slog.Warn("终端 shell 创建失败", "client", name, "err", err)
-		sendStatus(ctx, conn, "failed")
+		sendStatus(ctx, conn, &writeMu, "failed")
 		conn.Close(websocket.StatusInternalError, "终端启动失败: "+err.Error())
 		return
 	}
 
-	sendStatus(ctx, conn, "ready")
+	sendStatus(ctx, conn, &writeMu, "ready")
 
 	// WebSocket ping/pong keepalive — proxies typically drop idle connections
 	// after 60 seconds. Pinging every 30 seconds keeps the tunnel alive.
+	// Writes (Ping, Write) must be serialized — nhooyr.io/websocket
+	// requires exclusive write access to the connection.
+	pingDone := make(chan struct{})
 	go func() {
+		defer close(pingDone)
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				if err := conn.Ping(ctx); err != nil {
+				writeMu.Lock()
+				err := conn.Ping(ctx)
+				writeMu.Unlock()
+				if err != nil {
 					return
 				}
 			case <-ctx.Done():
@@ -94,7 +106,10 @@ func (h *TerminalHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		for {
 			select {
 			case chunk := <-sendQueue:
-				if err := conn.Write(ctx, websocket.MessageBinary, chunk); err != nil {
+				writeMu.Lock()
+				err := conn.Write(ctx, websocket.MessageBinary, chunk)
+				writeMu.Unlock()
+				if err != nil {
 					return
 				}
 			case <-ctx.Done():
@@ -142,14 +157,18 @@ done:
 	detach()
 	cancel()
 	<-pumpDone
+	<-pingDone
 
 	conn.Close(closeStatus, closeReason)
 	slog.Info("终端 WebSocket 已关闭", "client", name, "status", closeStatus)
 }
 
-func sendStatus(ctx context.Context, conn *websocket.Conn, state string) {
+func sendStatus(ctx context.Context, conn *websocket.Conn, mu *sync.Mutex, state string) {
 	msg, _ := json.Marshal(map[string]string{"type": "status", "state": state})
-	if err := conn.Write(ctx, websocket.MessageText, msg); err != nil {
+	mu.Lock()
+	err := conn.Write(ctx, websocket.MessageText, msg)
+	mu.Unlock()
+	if err != nil {
 		slog.Debug("发送状态失败", "state", state, "err", err)
 	}
 }

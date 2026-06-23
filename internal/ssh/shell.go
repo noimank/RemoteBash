@@ -222,7 +222,7 @@ func (s *PersistentShell) Start() error {
 			return fmt.Errorf("unalias rm: %w", err)
 		}
 		escaped := strings.ReplaceAll(s.initScript, "'", "'\\''")
-		if err := s.sendInit("eval '"+escaped+"' 2>/dev/null; true"); err != nil {
+		if err := s.sendInit("eval '" + escaped + "' 2>/dev/null; true"); err != nil {
 			s.Close()
 			return fmt.Errorf("init script: %w", err)
 		}
@@ -562,19 +562,28 @@ func (s *PersistentShell) ClearBuffer() {
 }
 
 // FeedRaw sends raw bytes to the PTY stdin (browser terminal keystrokes).
+// Reads s.stdin under s.mu to avoid racing Close() which sets stdin=nil
+// under the same lock.
 func (s *PersistentShell) FeedRaw(data []byte) error {
-	if s.stdin == nil {
+	s.mu.Lock()
+	stdin := s.stdin
+	s.mu.Unlock()
+	if stdin == nil {
 		return fmt.Errorf("persistent shell is not running")
 	}
-	_, err := s.stdin.Write(data)
+	_, err := stdin.Write(data)
 	return err
 }
 
 // Resize changes the PTY dimensions (called when the browser terminal resizes).
+// Reads s.session and writes s.cols/s.rows under s.mu to avoid racing Close().
 func (s *PersistentShell) Resize(cols, rows int) error {
+	s.mu.Lock()
+	sess := s.session
 	s.cols, s.rows = cols, rows
-	if s.session != nil {
-		return s.session.WindowChange(rows, cols)
+	s.mu.Unlock()
+	if sess != nil {
+		return sess.WindowChange(rows, cols)
 	}
 	return nil
 }

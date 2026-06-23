@@ -20,6 +20,20 @@ import (
 
 // RemoteSession manages an SSH connection to a remote host and provides
 // command execution (MCP path) and terminal shell access (browser path).
+//
+// Lock model (acquire outer → inner; never violate this order):
+//
+//	execLock    → connectLock → shellLock → connMu
+//
+//	execLock     serialises MCP Exec callers.
+//	connectLock  serialises the connection lifecycle: a Connect dial/publish
+//	             and a Disconnect claim are mutually exclusive, so after
+//	             Disconnect returns the session stays down until the next
+//	             explicit Connect.
+//	shellLock    guards shell, shellType, homeCache, cwd.
+//	connMu       (RWMutex) guards conn and keepaliveDone. All conn reads go
+//	             through snapshotConn(); writers are Connect (publish) and
+//	             Disconnect (claim), both under connectLock.
 type RemoteSession struct {
 	Name     string
 	Host     string
@@ -30,18 +44,21 @@ type RemoteSession struct {
 	SafeRm   bool
 	Via      string // jump host client name, empty = direct
 
-	conn           *gossh.Client
-	shell          *PersistentShell // MCP exec shell
-	shellType      string           // detected remote shell (ash, bash, ...)
-	shellLock      sync.Mutex       // guards EnsureShell
-	execLock       sync.Mutex       // serialises concurrent Exec callers
-	connectLock    sync.Mutex       // guards Connect against TOCTOU races
-	disconnectLock sync.Mutex       // serialises Disconnect calls
-	cwd            string
-	homeCache      string            // cached remote $HOME, valid for session lifetime
-	keepaliveDone  chan struct{}     // closed by stopKeepalive to terminate the keepalive goroutine
+	conn        *gossh.Client
+	connMu      sync.RWMutex // guards conn and keepaliveDone
+	connectLock sync.Mutex   // serialises Connect vs Disconnect
+
+	shell     *PersistentShell // MCP exec shell
+	shellType string           // detected remote shell (ash, bash, ...)
+	shellLock sync.Mutex       // guards shell, shellType, homeCache, cwd
+	execLock  sync.Mutex       // serialises concurrent Exec callers
+
+	cwd       string
+	homeCache string // cached remote $HOME, cleared on disconnect
+
+	keepaliveDone  chan struct{} // under connMu; closed to stop keepaliveLoop
 	auditCb        AuditCallback
-	tunnelResolver TunnelResolver // callable: name → *gossh.Client
+	tunnelResolver TunnelResolver // name → jump-host *gossh.Client
 	relay          *SocatTunnelRelay
 }
 
@@ -68,7 +85,31 @@ func NewRemoteSession(name, host, user, password string, port int, enabled, safe
 
 // Connected reports whether the SSH connection is alive.
 func (s *RemoteSession) Connected() bool {
-	return s.conn != nil
+	return s.snapshotConn() != nil
+}
+
+// snapshotConn returns the current SSH client under connMu, or nil if
+// disconnected. Every read of s.conn must go through here so it never races
+// with Connect/Disconnect.
+func (s *RemoteSession) snapshotConn() *gossh.Client {
+	s.connMu.RLock()
+	defer s.connMu.RUnlock()
+	return s.conn
+}
+
+// getCwd returns the last known remote working directory (for display).
+func (s *RemoteSession) getCwd() string {
+	s.shellLock.Lock()
+	defer s.shellLock.Unlock()
+	return s.cwd
+}
+
+// setCwd sets the remote working directory. Callers already holding shellLock
+// must write s.cwd directly to avoid self-deadlock.
+func (s *RemoteSession) setCwd(v string) {
+	s.shellLock.Lock()
+	s.cwd = v
+	s.shellLock.Unlock()
 }
 
 // ── SSH keepalive (two-layer) ─────────────────────────────────────────
@@ -87,54 +128,88 @@ func (s *RemoteSession) Connected() bool {
 // idle-timeout scenario: physical, network, and application.
 
 // startKeepalive launches the SSH-layer keepalive goroutine.
-// Must only be called when s.conn is non-nil.
+// Must only be called when a connection has just been published.
+// keepaliveDone is created under connMu so it cannot race with Disconnect's
+// close of the same channel.
 func (s *RemoteSession) startKeepalive() {
+	s.connMu.Lock()
 	s.keepaliveDone = make(chan struct{})
+	s.connMu.Unlock()
 	go s.keepaliveLoop()
 }
 
-// stopKeepalive signals the keepalive goroutine to exit.  Safe to call
-// even if the goroutine is not running (nil keepaliveDone).
+// stopKeepalive signals the keepalive goroutine to exit.
+// Safe to call when the goroutine is not running (nil or already-closed
+// keepaliveDone).
 func (s *RemoteSession) stopKeepalive() {
-	if s.keepaliveDone == nil {
+	s.connMu.Lock()
+	done := s.keepaliveDone
+	s.connMu.Unlock()
+	if done == nil {
 		return
 	}
 	select {
-	case <-s.keepaliveDone:
-		// already closed
+	case <-done:
 	default:
-		close(s.keepaliveDone)
+		close(done)
 	}
 }
 
 func (s *RemoteSession) keepaliveLoop() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+
+	// Capture the stop channel once at goroutine start. Without this, a later
+	// startKeepalive replacing s.keepaliveDone would leave this goroutine
+	// selecting on a fresh channel that is never closed — a leak.
+	s.connMu.Lock()
+	done := s.keepaliveDone
+	s.connMu.Unlock()
+
 	for {
 		select {
 		case <-ticker.C:
-			// Snapshot conn pointer under disconnectLock so we don't race
-			// with Disconnect() zeroing it.
-			s.disconnectLock.Lock()
-			conn := s.conn
-			s.disconnectLock.Unlock()
+			conn := s.snapshotConn()
 			if conn == nil {
 				return
 			}
-			if _, _, err := conn.SendRequest("keepalive@openssh.com", false, nil); err != nil {
-				// wantReply=false: fire-and-forget — works with every SSH server.
-				// Non-OpenSSH servers silently ignore unknown global requests
-				// (RFC 4254 §4) instead of returning SSH_MSG_REQUEST_FAILURE.
+
+			// Time-bounded SendRequest: even with wantReply=false the
+			// underlying TCP write can block on a dead connection whose
+			// socket buffer is full. A goroutine + select keeps this loop
+			// responsive regardless.
+			errCh := make(chan error, 1)
+			go func() {
+				_, _, err := conn.SendRequest("keepalive@openssh.com", false, nil)
+				errCh <- err
+			}()
+
+			var sendErr error
+			select {
+			case sendErr = <-errCh:
+			case <-time.After(10 * time.Second):
+				sendErr = fmt.Errorf(
+					"keepalive SendRequest timed out after 10s "+
+						"(remote %s:%d may be unreachable)",
+					s.Host, s.Port)
+			case <-done:
+				return
+			}
+
+			if sendErr != nil {
+				// Re-check the stop signal before tearing down: a concurrent
+				// reconnect may have replaced this connection, in which case
+				// the error is just the old one dying.
 				select {
-				case <-s.keepaliveDone:
+				case <-done:
 					return
 				default:
 				}
-				slog.Warn("SSH keepalive 丢失，断开连接", "client", s.Name, "err", err)
+				slog.Warn("SSH keepalive 丢失，断开连接", "client", s.Name, "err", sendErr)
 				s.Disconnect()
 				return
 			}
-		case <-s.keepaliveDone:
+		case <-done:
 			return
 		}
 	}
@@ -142,7 +217,7 @@ func (s *RemoteSession) keepaliveLoop() {
 
 // RawConn returns the underlying *gossh.Client, used for tunnel resolution.
 func (s *RemoteSession) RawConn() *gossh.Client {
-	return s.conn
+	return s.snapshotConn()
 }
 
 // SetAuditCallback registers the audit logging callback.
@@ -162,19 +237,11 @@ func (s *RemoteSession) Connect() error {
 	s.connectLock.Lock()
 	defer s.connectLock.Unlock()
 
+	// Atomic w.r.t. Disconnect (which also takes connectLock): no TOCTOU.
 	if s.Connected() {
 		return nil
 	}
-
 	s.stopKeepalive()
-
-	// On successful connect, launch TCP + SSH two-layer keepalive to cover
-	// physical disconnection, NAT timeouts, and sshd idle limits.
-	defer func() {
-		if s.conn != nil {
-			s.startKeepalive()
-		}
-	}()
 
 	config := &gossh.ClientConfig{
 		User:            s.User,
@@ -210,15 +277,13 @@ func (s *RemoteSession) Connect() error {
 				}
 				s.relay = relay
 
-				// Use the relayed socket instead.
 				ncc, chans, reqs, relaySSHErr := gossh.NewClientConn(sock, addr, config)
 				if relaySSHErr != nil {
 					relay.Close()
 					s.relay = nil
 					return fmt.Errorf("ssh over relay: %w", relaySSHErr)
 				}
-				s.conn = gossh.NewClient(ncc, chans, reqs)
-				s.cwd = "~"
+				s.publishConn(gossh.NewClient(ncc, chans, reqs))
 				slog.Info("跳板机中继连接成功", "via", s.Via, "target", fmt.Sprintf("%s:%d", s.Host, s.Port))
 				return nil
 			}
@@ -229,14 +294,13 @@ func (s *RemoteSession) Connect() error {
 		if tunnelSSHErr != nil {
 			return fmt.Errorf("ssh over tunnel: %w", tunnelSSHErr)
 		}
-		s.conn = gossh.NewClient(ncc, chans, reqs)
-		s.cwd = "~"
+		s.publishConn(gossh.NewClient(ncc, chans, reqs))
 		return nil
 	}
 
-	// Direct connection with TCP keepalive enabled on the underlying
-	// socket. The OS periodically probes an idle TCP connection so a
-	// dead remote host or network partition is detected quickly.
+	// Direct connection with TCP keepalive enabled on the underlying socket.
+	// The OS periodically probes an idle TCP connection so a dead remote host
+	// or network partition is detected quickly.
 	addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 	d := net.Dialer{
 		Timeout:   10 * time.Second,
@@ -251,18 +315,59 @@ func (s *RemoteSession) Connect() error {
 		tcpConn.Close()
 		return fmt.Errorf("ssh handshake %s: %w", addr, err)
 	}
-	s.conn = gossh.NewClient(ncc, chans, reqs)
-	s.cwd = "~"
+	s.publishConn(gossh.NewClient(ncc, chans, reqs))
 	return nil
+}
+
+// publishConn installs a freshly established SSH client as the active
+// connection (under connMu), resets session-scoped state, and starts
+// keepalive. Must be called with connectLock held.
+func (s *RemoteSession) publishConn(c *gossh.Client) {
+	s.connMu.Lock()
+	s.conn = c
+	s.connMu.Unlock()
+	s.setCwd("~")
+	s.startKeepalive()
 }
 
 // Disconnect closes the SSH connection and all associated shells.
 // Safe for concurrent calls.
+//
+// connectLock is held for the whole claim so this cannot interleave with a
+// Connect dial/publish: after Disconnect returns, the session stays down
+// until the next explicit Connect. connMu guards only the conn pointer and
+// keepaliveDone; the slow steps (conn.Close, shell teardown) run outside it.
 func (s *RemoteSession) Disconnect() {
-	s.disconnectLock.Lock()
-	defer s.disconnectLock.Unlock()
+	s.connectLock.Lock()
+	defer s.connectLock.Unlock()
 
-	// Close shell under shellLock to avoid racing EnsureShell.
+	// Step 1: claim the connection and stop keepalive atomically.
+	s.connMu.Lock()
+	conn := s.conn
+	s.conn = nil
+	if s.keepaliveDone != nil {
+		select {
+		case <-s.keepaliveDone:
+		default:
+			close(s.keepaliveDone)
+		}
+	}
+	s.connMu.Unlock()
+
+	// Step 2: close the SSH client outside any lock. On a truly dead
+	// connection the TCP write inside Close() (SSH_MSG_DISCONNECT) can block
+	// indefinitely, so bound it.
+	if conn != nil {
+		done := make(chan struct{})
+		go func() { conn.Close(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			slog.Warn("连接关闭超时，强制断开", "client", s.Name)
+		}
+	}
+
+	// Step 3: with the mux gone, tear down the shell under shellLock.
 	s.shellLock.Lock()
 	if s.shell != nil {
 		s.shell.Close()
@@ -272,11 +377,6 @@ func (s *RemoteSession) Disconnect() {
 	s.homeCache = ""
 	s.shellLock.Unlock()
 
-	if s.conn != nil {
-		s.conn.Close()
-		s.conn = nil
-	}
-	s.stopKeepalive()
 	if s.relay != nil {
 		s.relay.Close()
 		s.relay = nil
@@ -288,6 +388,11 @@ func (s *RemoteSession) Disconnect() {
 func (s *RemoteSession) EnsureShell() (*PersistentShell, error) {
 	s.shellLock.Lock()
 	defer s.shellLock.Unlock()
+
+	conn := s.snapshotConn()
+	if conn == nil {
+		return nil, fmt.Errorf("not connected")
+	}
 
 	// Rebuild if shell died or safe_rm was toggled.
 	if s.shell != nil && s.shell.Alive() && s.shell.SafeRmFlag() == s.SafeRm {
@@ -305,7 +410,7 @@ func (s *RemoteSession) EnsureShell() (*PersistentShell, error) {
 		initScript = SafeRmShim
 	}
 
-	shell := NewPersistentShell(s.conn, defaultCols, defaultRows, s.SafeRm, initScript, "")
+	shell := NewPersistentShell(conn, defaultCols, defaultRows, s.SafeRm, initScript, "")
 	if err := shell.Start(); err != nil {
 		return nil, fmt.Errorf("start mcp shell: %w", err)
 	}
@@ -344,7 +449,7 @@ func (s *RemoteSession) Exec(command string, timeout time.Duration) (*CommandOut
 			s.auditCb(s.Name, command, &CommandOutput{
 				Output:     fmt.Sprintf("SSH command failed: %v", err),
 				ExitCode:   -1,
-				Cwd:        s.cwd,
+				Cwd:        s.getCwd(),
 				DurationMs: elapsed,
 			})
 		}
@@ -352,7 +457,7 @@ func (s *RemoteSession) Exec(command string, timeout time.Duration) (*CommandOut
 		return nil, fmt.Errorf("ssh command failed: %w", err)
 	}
 
-	s.cwd = result.Cwd
+	s.setCwd(result.Cwd)
 	if s.auditCb != nil {
 		s.auditCb(s.Name, command, result)
 	}
@@ -379,9 +484,16 @@ func (s *RemoteSession) Transfer(ctx context.Context, src, dst, direction string
 
 	t0 := time.Now()
 
+	// Snapshot conn so a concurrent Disconnect can't nil it between Connect()
+	// above and sftp.NewClient() below.
+	conn := s.snapshotConn()
+	if conn == nil {
+		return nil, fmt.Errorf("disconnected before transfer")
+	}
+
 	// Open SFTP session over the SSH client. Concurrent writes pipeline write
 	// packets — the main throughput win for uploads over WAN links.
-	sftpClient, err := sftp.NewClient(s.conn, sftp.UseConcurrentWrites(true))
+	sftpClient, err := sftp.NewClient(conn, sftp.UseConcurrentWrites(true))
 	if err != nil {
 		return nil, fmt.Errorf("sftp session: %w", err)
 	}
@@ -521,14 +633,23 @@ func (s *RemoteSession) ExecUnlock() { s.execLock.Unlock() }
 // home returns the remote $HOME, using a cached value after first fetch.
 // $HOME is invariant for the life of an SSH connection, so it is safe to cache.
 func (s *RemoteSession) home() string {
+	s.shellLock.Lock()
 	if s.homeCache != "" {
-		return s.homeCache
+		h := s.homeCache
+		s.shellLock.Unlock()
+		return h
+	}
+	s.shellLock.Unlock()
+
+	conn := s.snapshotConn()
+	if conn == nil {
+		return ""
 	}
 
 	// Use a short-lived SSH session (reuses the existing TCP/encrypted
-	// connection — no re-auth) to avoid competing on execLock with
-	// concurrent command executions.  Typical cost: 2 RTT.
-	sess, err := s.conn.NewSession()
+	// connection — no re-auth) to avoid competing on execLock with concurrent
+	// command executions.  Typical cost: 2 RTT.
+	sess, err := conn.NewSession()
 	if err != nil {
 		return ""
 	}
@@ -539,8 +660,11 @@ func (s *RemoteSession) home() string {
 		return ""
 	}
 
-	s.homeCache = strings.TrimSpace(string(out))
-	return s.homeCache
+	h := strings.TrimSpace(string(out))
+	s.shellLock.Lock()
+	s.homeCache = h
+	s.shellLock.Unlock()
+	return h
 }
 
 // expandRemotePath expands ~ to the remote home directory.
@@ -574,12 +698,17 @@ func (s *RemoteSession) OpenTerminalShell() (*PersistentShell, error) {
 		return nil, err
 	}
 
+	conn := s.snapshotConn()
+	if conn == nil {
+		return nil, fmt.Errorf("disconnected before opening terminal shell")
+	}
+
 	var initScript string
 	if s.SafeRm {
 		initScript = SafeRmShim
 	}
 
-	shell := NewPersistentShell(s.conn, defaultCols, defaultRows, s.SafeRm, initScript, TerminalPS1)
+	shell := NewPersistentShell(conn, defaultCols, defaultRows, s.SafeRm, initScript, TerminalPS1)
 	if err := shell.Start(); err != nil {
 		return nil, fmt.Errorf("start terminal shell: %w", err)
 	}
@@ -588,17 +717,21 @@ func (s *RemoteSession) OpenTerminalShell() (*PersistentShell, error) {
 
 // ToInfo returns a serializable ClientInfo representation of the session.
 func (s *RemoteSession) ToInfo() models.ClientInfo {
+	connected := s.Connected()
+	s.shellLock.Lock()
+	cwd, shellType := s.cwd, s.shellType
+	s.shellLock.Unlock()
 	return models.ClientInfo{
 		Name:      s.Name,
 		Host:      s.Host,
 		Port:      s.Port,
 		User:      s.User,
-		Connected: s.Connected(),
-		Cwd:       s.cwd,
+		Connected: connected,
+		Cwd:       cwd,
 		Enabled:   s.Enabled,
 		SafeRm:    s.SafeRm,
 		Via:       s.Via,
-		ShellType: s.shellType,
+		ShellType: shellType,
 	}
 }
 
