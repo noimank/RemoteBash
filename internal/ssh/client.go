@@ -71,12 +71,23 @@ func (s *RemoteSession) Connected() bool {
 	return s.conn != nil
 }
 
-// ── SSH keepalive ──────────────────────────────────────────────────────
+// ── SSH keepalive (two-layer) ─────────────────────────────────────────
+//
+// Layer 1 — TCP keepalive (SO_KEEPALIVE, 15 s): OS-level dead-peer detection.
+//   Catches remote host crash, physical disconnection, or network partition.
+//   Set on the net.Conn at dial time for the direct connection path.
+//
+// Layer 2 — SSH keepalive (keepalive@openssh.com, 30 s, wantReply=false):
+//   Fire-and-forget global request that prevents NAT gateways, firewalls,
+//   and sshd ServerAliveCountMax from dropping truly idle encrypted tunnels.
+//   Non-OpenSSH servers silently ignore unknown requests (RFC 4254 §4), so
+//   this is safe for Dropbear, Tectia, libssh, and network-device SSHds.
+//
+// Between the two layers, the connection stays alive through nearly every
+// idle-timeout scenario: physical, network, and application.
 
-// startKeepalive launches a background goroutine that sends
-// keepalive@openssh.com requests every 30 seconds, preventing NAT
-// gateways, firewalls, and sshd ServerAliveCountMax timers from killing
-// idle connections.  Must only be called when s.conn is non-nil.
+// startKeepalive launches the SSH-layer keepalive goroutine.
+// Must only be called when s.conn is non-nil.
 func (s *RemoteSession) startKeepalive() {
 	s.keepaliveDone = make(chan struct{})
 	go s.keepaliveLoop()
@@ -110,10 +121,10 @@ func (s *RemoteSession) keepaliveLoop() {
 			if conn == nil {
 				return
 			}
-			if _, _, err := conn.SendRequest("keepalive@openssh.com", true, nil); err != nil {
-				// If keepaliveDone was closed while we were blocked on
-				// SendRequest, Connect() or Disconnect() is replacing the
-				// session — bail out instead of calling Disconnect().
+			if _, _, err := conn.SendRequest("keepalive@openssh.com", false, nil); err != nil {
+				// wantReply=false: fire-and-forget — works with every SSH server.
+				// Non-OpenSSH servers silently ignore unknown global requests
+				// (RFC 4254 §4) instead of returning SSH_MSG_REQUEST_FAILURE.
 				select {
 				case <-s.keepaliveDone:
 					return
@@ -157,9 +168,8 @@ func (s *RemoteSession) Connect() error {
 
 	s.stopKeepalive()
 
-	// If we successfully set s.conn below, the keepalive goroutine keeps the
-	// encrypted tunnel alive across idle periods — NAT gateways, firewalls,
-	// and SSH ServerAliveCountMax timers all kill truly idle connections.
+	// On successful connect, launch TCP + SSH two-layer keepalive to cover
+	// physical disconnection, NAT timeouts, and sshd idle limits.
 	defer func() {
 		if s.conn != nil {
 			s.startKeepalive()
@@ -224,13 +234,24 @@ func (s *RemoteSession) Connect() error {
 		return nil
 	}
 
-	// Direct connection.
+	// Direct connection with TCP keepalive enabled on the underlying
+	// socket. The OS periodically probes an idle TCP connection so a
+	// dead remote host or network partition is detected quickly.
 	addr := net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
-	conn, err := gossh.Dial("tcp", addr, config)
+	d := net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 15 * time.Second,
+	}
+	tcpConn, err := d.Dial("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("connect %s: %w", addr, err)
 	}
-	s.conn = conn
+	ncc, chans, reqs, err := gossh.NewClientConn(tcpConn, addr, config)
+	if err != nil {
+		tcpConn.Close()
+		return fmt.Errorf("ssh handshake %s: %w", addr, err)
+	}
+	s.conn = gossh.NewClient(ncc, chans, reqs)
 	s.cwd = "~"
 	return nil
 }
