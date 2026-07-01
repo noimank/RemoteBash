@@ -98,18 +98,47 @@ func (c *ServerConfig) DashboardURL() string {
 
 // RequestDashboardURL derives the dashboard URL from the incoming HTTP request.
 // Uses r.Host (what the browser actually addressed) and detects TLS from the
-// connection state or the X-Forwarded-Proto header (common in reverse-proxy
-// setups). Falls back to the static DashboardURL() when r.Host is empty
-// (should never happen in a real request, but defensive).
+// connection state or proxy headers. Falls back to the static DashboardURL()
+// when r.Host is empty (should never happen in a real request, but defensive).
 func (c *ServerConfig) RequestDashboardURL(r *http.Request) string {
 	if r.Host == "" {
 		return c.DashboardURL()
 	}
 	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+	if isHTTPS(r) {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host + c.BaseURLPrefix
+}
+
+// isHTTPS detects whether the original browser request used HTTPS. Checks:
+// 1. r.TLS — direct TLS (if Go handles it)
+// 2. X-Forwarded-Proto — de facto standard (nginx, Traefik, Caddy, HAProxy, ALB)
+// 3. X-Forwarded-Scheme — less common variant
+// 4. X-Forwarded-Ssl / Front-End-Https — Azure, IIS, legacy proxies
+// 5. Referer — browser-sent full URL (e.g. "https://..."), unfiltered by proxies
+func isHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if r.Header.Get("X-Forwarded-Proto") == "https" {
+		return true
+	}
+	if r.Header.Get("X-Forwarded-Scheme") == "https" {
+		return true
+	}
+	if r.Header.Get("X-Forwarded-Ssl") == "on" {
+		return true
+	}
+	if r.Header.Get("Front-End-Https") == "on" {
+		return true
+	}
+	// Last resort: the browser's Referer header contains the full scheme.
+	// When navigating from an HTTPS page, Referer starts with "https://".
+	if strings.HasPrefix(r.Referer(), "https://") {
+		return true
+	}
+	return false
 }
 
 // Addr returns the listen address string "host:port".
