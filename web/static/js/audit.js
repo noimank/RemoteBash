@@ -2,8 +2,9 @@
  * RemoteBash 审计日志 — 前端逻辑
  */
 
-const CLIENTS_API = "/api/clients";
-const AUDIT_API = "/api/audit";
+const ROOT = window.BASE_URL_PREFIX || "";
+const CLIENTS_API = ROOT + "/api/clients";
+const AUDIT_API = ROOT + "/api/audit";
 const PAGE_SIZE = 50;
 
 let currentPage = 0;

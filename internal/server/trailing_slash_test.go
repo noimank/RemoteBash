@@ -12,7 +12,7 @@ func TestTrailingSlashRedirect(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
-	handler := trailingSlashRedirect(inner)
+	handler := trailingSlashRedirect(inner, "")
 
 	tests := []struct {
 		name           string
@@ -114,6 +114,86 @@ func TestTrailingSlashRedirect(t *testing.T) {
 			if tt.wantLocation != "" {
 				loc := rec.Header().Get("Location")
 				if loc != tt.wantLocation {
+					t.Errorf("Location = %q, want %q", loc, tt.wantLocation)
+				}
+			}
+
+			if tt.wantBody != "" {
+				if body := rec.Body.String(); body != tt.wantBody {
+					t.Errorf("body = %q, want %q", body, tt.wantBody)
+				}
+			}
+		})
+	}
+}
+
+// TestTrailingSlashRedirectWithBaseURLPrefix verifies that under a sub-path prefix
+// the redirect Location carries the root prefix back (the handler runs after
+// StripPrefix, so it sees the stripped path but must emit a prefixed Location).
+func TestTrailingSlashRedirectWithBaseURLPrefix(t *testing.T) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	handler := trailingSlashRedirect(inner, "/rb")
+
+	tests := []struct {
+		name         string
+		method       string
+		path         string
+		query        string
+		wantStatus   int
+		wantLocation string
+		wantBody     string
+	}{
+		{
+			name:         "audit trailing slash — Location carries root prefix",
+			method:       "GET",
+			path:         "/audit/",
+			wantStatus:   http.StatusMovedPermanently,
+			wantLocation: "/rb/audit",
+		},
+		{
+			name:         "mcp trailing slash with query — prefix + query preserved",
+			method:       "POST",
+			path:         "/mcp/",
+			query:        "foo=bar",
+			wantStatus:   http.StatusMovedPermanently,
+			wantLocation: "/rb/mcp?foo=bar",
+		},
+		{
+			name:       "root — passthrough (renders dashboard after strip)",
+			method:     "GET",
+			path:       "/",
+			wantStatus: http.StatusOK,
+			wantBody:   "ok",
+		},
+		{
+			name:       "static prefix — passthrough",
+			method:     "GET",
+			path:       "/static/js/app.js",
+			wantStatus: http.StatusOK,
+			wantBody:   "ok",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := tt.path
+			if tt.query != "" {
+				target += "?" + tt.query
+			}
+			req := httptest.NewRequest(tt.method, target, nil)
+			rec := httptest.NewRecorder()
+
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+
+			if tt.wantLocation != "" {
+				if loc := rec.Header().Get("Location"); loc != tt.wantLocation {
 					t.Errorf("Location = %q, want %q", loc, tt.wantLocation)
 				}
 			}

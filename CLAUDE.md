@@ -77,6 +77,8 @@ web/
 
 A single `net/http.ServeMux` (Go 1.22+ method routing) hosts everything on one port: dashboard at `/`, audit at `/audit`, guide at `/guide`, logs at `/logs`, REST API at `/api/*`, MCP at `/mcp`, WebSocket terminal at `/api/clients/{name}/terminal`, static files at `/static/*`, and `/health` for readiness probes. A `trailingSlashRedirect` wrapper normalises `/path/` → `/path`. The MCP server is created via `mark3labs/mcp-go` and mounted as an `http.Handler`. Recovery middleware catches panics in handlers.
 
+**Sub-path deployment (`BASE_URL_PREFIX`)** — the `BASE_URL_PREFIX` env var / `--base-url-prefix` flag (default empty) mounts the whole app under a URL prefix for reverse-proxy use. The mux is wrapped in `rootRedirect` (bare prefix → prefix+`/`) then `http.StripPrefix(baseURLPrefix)`, so internal routes and `mcp-go` still see root paths (`/api`, `/mcp` …) unchanged. `trailingSlashRedirect` takes the baseURLPrefix to re-prefix its redirect `Location`; `DashboardURL()` appends BaseURLPrefix (feeding the SSE `WithBaseURL` and the guide's MCP snippets); the frontend reads `window.BASE_URL_PREFIX` (injected into `base.gohtml`) to prefix every fetch, nav link, and the terminal WebSocket.
+
 ### Persistent interactive shell (`internal/ssh/shell.go`, `internal/ssh/client.go`)
 
 Commands run on a **single long-lived interactive bash shell with an allocated PTY**, not a fresh `/bin/bash -c` per call. `PersistentShell` manages this:

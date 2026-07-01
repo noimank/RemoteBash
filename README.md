@@ -313,6 +313,36 @@ ssh server 'remotebash --host 0.0.0.0 --port 24587'
 
 配合 systemd 或 supervisord 可实现开机自启。
 
+### 如何用反向代理部署到子路径？
+
+通过 `BASE_URL_PREFIX` 环境变量（或 `--base-url-prefix` 参数）让整个应用运行在一个 URL 前缀下，反向代理只需一条“保留前缀转发”规则：
+
+```bash
+# Docker：设前缀为 /remotebash
+docker run -e BASE_URL_PREFIX=/remotebash -p 24587:24587 remotebash
+
+# 或二进制直接传参
+remotebash --host 0.0.0.0 --base-url-prefix /remotebash
+```
+
+以 nginx 为例，把 `/remotebash/` 转发到容器（务必保留前缀、放行 WebSocket）：
+
+```nginx
+location /remotebash/ {
+    proxy_pass http://127.0.0.1:24587;     # 末尾不要加路径，保留 /remotebash 前缀
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+
+    # WebSocket（浏览器终端）
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade           $http_upgrade;
+    proxy_set_header Connection        "upgrade";
+    proxy_read_timeout 1h;
+}
+```
+
+随后访问 `https://你的域名/remotebash/`，MCP 接入地址为 `https://你的域名/remotebash/mcp`。
+
 ## 许可证
 
 MIT

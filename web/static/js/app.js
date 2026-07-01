@@ -2,7 +2,8 @@
  * RemoteBash 连接管理 — 前端逻辑
  */
 
-const CLIENTS_API = "/api/clients";
+const ROOT = window.BASE_URL_PREFIX || "";
+const CLIENTS_API = ROOT + "/api/clients";
 
 // ---------------------------------------------------------------------------
 // 提示

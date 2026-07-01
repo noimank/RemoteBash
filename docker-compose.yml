@@ -7,6 +7,9 @@ services:
     volumes:
       - ./remotebash-data:/data
     restart: unless-stopped
+    # 反向代理子路径部署：设置前缀，并让反代保留前缀转发到 24587（含 WebSocket）：
+    # environment:
+    #   - BASE_URL_PREFIX=/remotebash
     # 如需调试日志，取消下面注释：
     # command: ["--host", "0.0.0.0", "--port", "24587", "--db", "/data/remotebash.db", "--debug"]
 

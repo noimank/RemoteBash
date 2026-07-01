@@ -3,9 +3,11 @@ package config
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // DefaultDB returns the platform-appropriate default database path.
@@ -19,11 +21,12 @@ func DefaultDB() string {
 
 // ServerConfig holds all CLI-configurable server settings.
 type ServerConfig struct {
-	Transport string // "http" or "sse"
-	Host      string
-	Port      int
-	Debug     bool
-	DBPath    string
+	Transport     string // "http" or "sse"
+	Host          string
+	Port          int
+	Debug         bool
+	DBPath        string
+	BaseURLPrefix string // URL 子路径前缀，规范化后为 ""（根）或 "/seg[/seg...]"（无尾斜杠）
 }
 
 // ParseFlags parses CLI arguments and returns a ServerConfig.
@@ -35,6 +38,9 @@ func ParseFlags() *ServerConfig {
 	flag.IntVar(&cfg.Port, "port", 24587, "Listen port")
 	flag.BoolVar(&cfg.Debug, "debug", false, "Enable debug logging")
 	flag.StringVar(&cfg.DBPath, "db", DefaultDB(), "SQLite database path")
+	// 默认值取 BASE_URL_PREFIX 环境变量（便于容器 -e 注入），命令行 --base-url-prefix 优先。
+	flag.StringVar(&cfg.BaseURLPrefix, "base-url-prefix", os.Getenv("BASE_URL_PREFIX"),
+		"URL 子路径前缀（反向代理部署用，如 /remotebash；默认空 = 部署在根）")
 	flag.Parse()
 
 	return cfg
@@ -48,17 +54,62 @@ func (c *ServerConfig) Validate() error {
 	if c.Port < 1 || c.Port > 65535 {
 		return fmt.Errorf("invalid port %d: must be between 1 and 65535", c.Port)
 	}
+
+	c.BaseURLPrefix = normalizeBaseURLPrefix(c.BaseURLPrefix)
+	for _, r := range c.BaseURLPrefix {
+		switch {
+		case r == '/' || r == '-' || r == '.' || r == '_':
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
+		default:
+			return fmt.Errorf("invalid base-url-prefix %q: only letters, digits, '/', '-', '.', '_' are allowed", c.BaseURLPrefix)
+		}
+	}
 	return nil
 }
 
+// normalizeBaseURLPrefix 规范化为 ""（根）或 "/seg[/seg...]"：保证前导斜杠、去除尾斜杠。
+func normalizeBaseURLPrefix(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "/" {
+		return ""
+	}
+	if !strings.HasPrefix(s, "/") {
+		s = "/" + s
+	}
+	s = strings.TrimSuffix(s, "/")
+	if s == "" {
+		return ""
+	}
+	return s
+}
+
 // DashboardURL returns the browser-reachable dashboard URL, normalising
-// wildcard bind addresses to localhost.
+// wildcard bind addresses to localhost and appending the configured prefix.
+// Prefer RequestDashboardURL for page templates — it derives the URL from the
+// incoming request and is more accurate when accessed from a different machine
+// or through a reverse proxy.
 func (c *ServerConfig) DashboardURL() string {
 	display := c.Host
 	if display == "" || display == "0.0.0.0" || display == "::" {
 		display = "localhost"
 	}
-	return "http://" + display + ":" + strconv.Itoa(c.Port)
+	return "http://" + display + ":" + strconv.Itoa(c.Port) + c.BaseURLPrefix
+}
+
+// RequestDashboardURL derives the dashboard URL from the incoming HTTP request.
+// Uses r.Host (what the browser actually addressed) and detects TLS from the
+// connection state or the X-Forwarded-Proto header (common in reverse-proxy
+// setups). Falls back to the static DashboardURL() when r.Host is empty
+// (should never happen in a real request, but defensive).
+func (c *ServerConfig) RequestDashboardURL(r *http.Request) string {
+	if r.Host == "" {
+		return c.DashboardURL()
+	}
+	scheme := "http"
+	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host + c.BaseURLPrefix
 }
 
 // Addr returns the listen address string "host:port".

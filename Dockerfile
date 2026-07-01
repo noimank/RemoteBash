@@ -32,10 +32,15 @@ COPY --from=builder /build/remotebash /usr/local/bin/remotebash
 # 持久化数据目录（SQLite 数据库）。
 RUN mkdir -p /data
 
+# 反向代理子路径部署：设为应用挂载的前缀（如 /remotebash），应用会据此剥离
+# 前缀，并让前端 / MCP / 静态资源 / WebSocket 都带上它；默认空 = 部署在根。
+# 用法：docker run -e BASE_URL_PREFIX=/remotebash ...（反代需保留前缀转发到 24587）。
+ENV BASE_URL_PREFIX=""
+
 EXPOSE 24587
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:24587/health || exit 1
+    CMD sh -c "wget --no-verbose --tries=1 --spider http://localhost:24587${BASE_URL_PREFIX}/health || exit 1"
 
 # 默认绑定所有接口，数据库写入持久化卷。
 ENTRYPOINT ["/usr/local/bin/remotebash"]

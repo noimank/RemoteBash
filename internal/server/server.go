@@ -127,7 +127,13 @@ func (s *Server) buildMux() http.Handler {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", s.staticFS))
 
 	// Wrap: trailing-slash redirect → recovery.
-	return trailingSlashRedirect(recoveryMiddleware(mux))
+	// 反向代理子路径部署（BaseURLPrefix 非空）时，外层再包 rootRedirect（裸前缀→根）
+	// 与 StripPrefix（剥离前缀），使内部路由与 handler（含 mcp-go）始终看到根路径。
+	h := trailingSlashRedirect(recoveryMiddleware(mux), s.cfg.BaseURLPrefix)
+	if s.cfg.BaseURLPrefix != "" {
+		h = rootRedirect(http.StripPrefix(s.cfg.BaseURLPrefix, h), s.cfg.BaseURLPrefix)
+	}
+	return h
 }
 
 // healthHandler returns a simple health check response.
@@ -140,7 +146,8 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 // dashboardPage renders the dashboard HTML page.
 func (s *Server) dashboardPage(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{
-		"DashboardURL": s.cfg.DashboardURL(),
+		"BaseURLPrefix":     s.cfg.BaseURLPrefix,
+		"DashboardURL": s.cfg.RequestDashboardURL(r),
 		"ActivePage":   "dashboard",
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "base.gohtml", data); err != nil {
@@ -151,7 +158,8 @@ func (s *Server) dashboardPage(w http.ResponseWriter, r *http.Request) {
 // auditPage renders the audit log HTML page.
 func (s *Server) auditPage(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{
-		"DashboardURL": s.cfg.DashboardURL(),
+		"BaseURLPrefix":     s.cfg.BaseURLPrefix,
+		"DashboardURL": s.cfg.RequestDashboardURL(r),
 		"ActivePage":   "audit",
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "base.gohtml", data); err != nil {
@@ -164,7 +172,8 @@ func (s *Server) auditPage(w http.ResponseWriter, r *http.Request) {
 // examples are always correct without manual editing.
 func (s *Server) guidePage(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{
-		"DashboardURL": s.cfg.DashboardURL(),
+		"BaseURLPrefix":     s.cfg.BaseURLPrefix,
+		"DashboardURL": s.cfg.RequestDashboardURL(r),
 		"Transport":    s.cfg.Transport,
 		"ActivePage":   "guide",
 	}
@@ -176,7 +185,8 @@ func (s *Server) guidePage(w http.ResponseWriter, r *http.Request) {
 // logPage renders the server log viewer HTML page.
 func (s *Server) logPage(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{
-		"DashboardURL": s.cfg.DashboardURL(),
+		"BaseURLPrefix":     s.cfg.BaseURLPrefix,
+		"DashboardURL": s.cfg.RequestDashboardURL(r),
 		"ActivePage":   "logs",
 	}
 	if err := s.tmpl.ExecuteTemplate(w, "base.gohtml", data); err != nil {
@@ -260,7 +270,9 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 
 // trailingSlashRedirect redirects /path/ → /path (301 Moved Permanently).
 // Only applies to non-root paths that are not prefix-pattern routes like /static/.
-func trailingSlashRedirect(next http.Handler) http.Handler {
+// baseURLPrefix is prepended to the redirect Location so it stays correct under a
+// reverse-proxy sub-path; when empty the behaviour is unchanged.
+func trailingSlashRedirect(next http.Handler, baseURLPrefix string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
@@ -276,12 +288,30 @@ func trailingSlashRedirect(next http.Handler) http.Handler {
 			return
 		}
 
-		// Build redirect target: strip trailing slash, preserve query string.
-		target := strings.TrimSuffix(path, "/")
+		// Build redirect target: strip trailing slash, restore the base-url
+		// prefix, and preserve the query string.
+		target := baseURLPrefix + strings.TrimSuffix(path, "/")
 		if r.URL.RawQuery != "" {
 			target += "?" + r.URL.RawQuery
 		}
 
 		http.Redirect(w, r, target, http.StatusMovedPermanently)
+	})
+}
+
+// rootRedirect redirects the bare prefix (e.g. /remotebash) to prefix+"/" so
+// that after StripPrefix the request lands on "/" and renders the dashboard.
+// All other requests pass through to the inner handler (StripPrefix).
+func rootRedirect(next http.Handler, baseURLPrefix string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == baseURLPrefix {
+			target := baseURLPrefix + "/"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }

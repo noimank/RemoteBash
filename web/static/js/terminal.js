@@ -56,7 +56,8 @@ class TerminalSession {
 
   _wsUrl() {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return `${proto}//${location.host}/api/clients/${encodeURIComponent(this.clientName)}/terminal`;
+    const root = window.BASE_URL_PREFIX || "";
+    return `${proto}//${location.host}${root}/api/clients/${encodeURIComponent(this.clientName)}/terminal`;
   }
 
   _connect() {

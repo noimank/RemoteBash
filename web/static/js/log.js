@@ -2,7 +2,8 @@
  * RemoteBash 运行日志 — 前端逻辑
  */
 
-const LOGS_API = "/api/logs";
+const ROOT = window.BASE_URL_PREFIX || "";
+const LOGS_API = ROOT + "/api/logs";
 const PAGE_SIZE = 50;
 
 let currentPage = 0;
