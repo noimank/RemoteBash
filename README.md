@@ -10,6 +10,8 @@
 - **浏览器终端**：xterm.js 真实 PTY 终端，支持颜色和交互程序
 - **命令审计**：每次执行全量记录至 SQLite
 
+![APP](./assets/app.png)
+
 ## 快速开始
 
 从 [GitHub Releases](https://github.com/noimank/RemoteBash/releases) 下载二进制，或从源码构建（Go ≥ 1.22）：
